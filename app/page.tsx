@@ -1,65 +1,125 @@
-import Image from "next/image";
+'use client'
+
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import SubmissionForm from '@/components/SubmissionForm'
+import AgentProcessing from '@/components/AgentProcessing'
+import CitizenHome from '@/components/CitizenHome'
+import { GovHeader, GovFooter, type NavId } from '@/components/saddad-ui'
+
+type Screen = 'home' | 'form' | 'processing'
+const SCREENS: Screen[] = ['home', 'form', 'processing']
 
 export default function Home() {
+  const router = useRouter()
+  const [booted, setBooted] = useState(false)
+  const [screen, setScreen] = useState<Screen>('home')
+  const [appId, setAppId] = useState('')
+  const [formData, setFormData] = useState<Record<string, string>>({})
+  const [homeKey, setHomeKey] = useState(0)
+
+  // Boot: require a UAE PASS sign-in (which sets the profile App ID). Restore the last
+  // screen + form data from the session, so a page refresh — or returning from Settings —
+  // keeps the user exactly where they were instead of dropping them back on the home page.
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const id = typeof window !== 'undefined' ? sessionStorage.getItem('saddad_app_id') || '' : ''
+      if (!id) { router.replace('/login'); return }
+      let s: Screen = 'home'
+      let fd: Record<string, string> = {}
+      try {
+        const raw = sessionStorage.getItem('saddad-session')
+        if (raw) {
+          const parsed = JSON.parse(raw)
+          if (SCREENS.includes(parsed.screen)) s = parsed.screen
+          if (parsed.formData && typeof parsed.formData === 'object') fd = parsed.formData
+        }
+      } catch { /* ignore */ }
+      if (cancelled) return
+      setAppId(id)
+      setFormData(fd)
+      setScreen(s)
+      setBooted(true)
+    })()
+    return () => { cancelled = true }
+  }, [router])
+
+  // Persist the active screen + submitted form data so refresh / Settings round-trips resume.
+  useEffect(() => {
+    if (!booted || typeof window === 'undefined') return
+    try { sessionStorage.setItem('saddad-session', JSON.stringify({ screen, formData })) } catch { /* ignore */ }
+  }, [screen, formData, booted])
+
+  function handleFormSubmit(data: Record<string, string>) {
+    if (typeof window !== 'undefined') sessionStorage.removeItem('saddad-wizard-state')
+    setFormData(data)
+    setScreen('processing')
+  }
+  function goHome() {
+    if (typeof window !== 'undefined') sessionStorage.removeItem('saddad-wizard-state')
+    setHomeKey((k) => k + 1)
+    setScreen('home')
+  }
+  function startNewApplication() {
+    if (typeof window !== 'undefined') {
+      if (appId) sessionStorage.setItem('saddad_prefill_appid', appId)
+      sessionStorage.removeItem('saddad-wizard-state')
+    }
+    setScreen('form')
+  }
+  // Re-submission from a case card. 'docs' opens the wizard at the Documents step.
+  function resubmit(mode: 'docs' | 'reapply') {
+    if (typeof window !== 'undefined') {
+      if (appId) sessionStorage.setItem('saddad_prefill_appid', appId)
+      if (mode === 'docs') sessionStorage.setItem('saddad_resubmit_mode', 'docs')
+      sessionStorage.removeItem('saddad-wizard-state')
+    }
+    setScreen('form')
+  }
+  function viewProgress(caseNumber: string, fullName = '') {
+    setFormData({ case_number: caseNumber, full_name: fullName })
+    setScreen('processing')
+  }
+  async function handleLogout() {
+    await fetch('/api/auth/logout', { method: 'POST' })
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('saddad_app_id')
+      sessionStorage.removeItem('saddad_logged_in')
+      sessionStorage.removeItem('saddad-session')
+      sessionStorage.removeItem('saddad-wizard-state')
+    }
+    router.push('/login')
+    router.refresh()
+  }
+  function handleNav(id: NavId) {
+    if (id === 'login') { handleLogout(); return }
+    if (id === 'settings') { router.push('/settings'); return }
+    if (id === 'submit') goHome()
+    if (id === 'processing' && formData.case_number) setScreen('processing')
+  }
+
+  if (!booted) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'var(--bg)' }}>
+        <span style={{ color: 'var(--muted)', fontSize: 14 }}>Loading SADDAD…</span>
+      </div>
+    )
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+    <div className="page">
+      <a href="#main-content" className="sr-only">Skip to main content</a>
+      <GovHeader active={(screen === 'processing' ? 'processing' : 'submit') as NavId} onNav={handleNav} userRole="citizen" />
+      <main id="main-content" className="page-body">
+        {screen === 'home' && (
+          <CitizenHome key={homeKey} appId={appId} onNewApplication={startNewApplication} onResubmit={resubmit} onViewProgress={viewProgress} />
+        )}
+        {screen === 'form' && <SubmissionForm onSubmit={handleFormSubmit} onHome={goHome} />}
+        {/* Key by case number so switching cases fully remounts — never shows a prior case's data. */}
+        {screen === 'processing' && <AgentProcessing key={formData.case_number || 'proc'} formData={formData} onReset={goHome} />}
       </main>
+      <GovFooter />
     </div>
-  );
+  )
 }
