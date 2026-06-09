@@ -647,9 +647,9 @@ table.cases tr:hover td { background: var(--cream-soft); }
   border-bottom-color: var(--gold);
 }
 
+/* Plain pill button — placement is handled by the .staff-btn-row wrapper so the
+   Officer and Admin buttons sit side by side instead of stacking. */
 .officer-btn {
-  position: absolute;
-  bottom: 40px;
   background: rgba(155, 122, 54, 0.02);
   border: 1px solid rgba(155, 122, 54, 0.15);
   color: var(--muted);
@@ -663,7 +663,6 @@ table.cases tr:hover td { background: var(--cream-soft); }
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-  z-index: 10;
 }
 
 .officer-btn:hover {
@@ -1650,3 +1649,88 @@ html.high-contrast *:focus-visible {
 
 /* Arabic system language — apply the Arabic typeface app-wide (dir=rtl is set on <html>). */
 #a11y-root.a11y-lang-ar { font-family: var(--font-ar); }
+
+/* ============================================================
+   SADDAD AI ASSISTANT WIDGET (floating, role-aware)
+   ============================================================ */
+.assistant-fab {
+  position: fixed; bottom: 26px; inset-inline-end: 26px; z-index: 90;
+  width: 58px; height: 58px; border-radius: 999px; border: none; cursor: pointer;
+  background: var(--gold); color: #fff; display: grid; place-items: center;
+  box-shadow: var(--shadow-lg); transition: .16s;
+}
+.assistant-fab:hover { background: var(--gold-dark); transform: translateY(-2px); }
+
+.assistant-panel {
+  position: fixed; bottom: 26px; inset-inline-end: 26px; z-index: 95;
+  width: 380px; max-width: 94vw; height: 560px; max-height: 82vh;
+  background: var(--panel); border: 1px solid var(--line-strong);
+  border-radius: var(--r-xl); box-shadow: var(--shadow-lg);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.assistant-hd {
+  display: flex; align-items: center; gap: 11px; padding: 15px 16px;
+  background: var(--cream-soft); border-bottom: 1px solid var(--gold-line);
+}
+.assistant-hd-ico {
+  width: 36px; height: 36px; border-radius: 999px; flex: none;
+  background: var(--gold-tint); border: 1px solid var(--gold-line); color: var(--gold-dark);
+  display: grid; place-items: center;
+}
+.assistant-title { font-weight: 800; color: var(--ink); font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.assistant-sub { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.assistant-clear {
+  border: 1px solid var(--line-strong); background: var(--panel); color: var(--muted);
+  font-size: 11.5px; font-weight: 700; padding: 5px 9px; border-radius: var(--r-sm);
+  cursor: pointer; font-family: inherit; flex: none;
+}
+.assistant-clear:hover { color: var(--gold-dark); border-color: var(--gold-line); }
+.assistant-close {
+  border: none; background: none; color: var(--muted); cursor: pointer; padding: 6px;
+  border-radius: var(--r-sm); display: grid; place-items: center; flex: none;
+}
+.assistant-close:hover { color: var(--ink); background: var(--panel-alt); }
+
+.assistant-log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.assistant-bubble {
+  max-width: 82%; padding: 9px 13px; border-radius: 14px; font-size: 13.5px;
+  line-height: 1.55; white-space: pre-wrap; background: var(--panel-alt);
+  border: 1px solid var(--line); color: var(--body);
+}
+.assistant-bubble.user { background: var(--gold); border-color: var(--gold); color: #fff; }
+
+.assistant-quick { padding: 0 14px 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+.assistant-quick button {
+  font-size: 11.5px; font-weight: 700; padding: 6px 11px; border-radius: 999px;
+  border: 1px solid var(--gold-line); background: var(--gold-tint); color: var(--gold-dark);
+  cursor: pointer; font-family: inherit; transition: .15s;
+}
+.assistant-quick button:hover { background: var(--gold); color: #fff; }
+.assistant-quick button:disabled { opacity: .5; cursor: default; }
+
+.assistant-input {
+  display: flex; align-items: center; gap: 8px; padding: 12px 14px;
+  border-top: 1px solid var(--line);
+}
+.assistant-input input {
+  flex: 1; border: 1px solid var(--line-strong); border-radius: var(--r);
+  padding: 10px 13px; font-size: 14px; font-family: inherit; color: var(--ink);
+  background: var(--bg); outline: none;
+}
+.assistant-input input:focus { border-color: var(--gold); }
+.assistant-input button {
+  width: 40px; height: 40px; border-radius: var(--r); border: none; cursor: pointer;
+  background: var(--gold); color: #fff; display: grid; place-items: center; flex: none;
+}
+.assistant-input button:hover { background: var(--gold-dark); }
+.assistant-input button:disabled { opacity: .5; cursor: default; }
+
+/* Two staff entry points under the login card — Officer and Admin are different
+   users with different portals, so each gets its own button + modal. */
+.staff-btn-row {
+  position: absolute;
+  bottom: 40px;
+  display: flex;
+  gap: 12px;
+  z-index: 10;
+}

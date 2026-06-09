@@ -3,6 +3,7 @@ import { Plus_Jakarta_Sans, IBM_Plex_Sans_Arabic } from "next/font/google";
 import "./globals.css";
 import { TTSProvider } from "@/lib/tts";
 import { AccessibilityProvider } from "@/components/AccessibilityProvider";
+import AssistantWidget from "@/components/AssistantWidget";
 
 // The MOEI design system's two typefaces, self-hosted via next/font and exposed as the
 // CSS variables (--font-jakarta / --font-plex-ar) that globals.css maps --font / --font-ar to.
@@ -34,7 +35,10 @@ export default function RootLayout({
       <body>
         <TTSProvider>
           <AccessibilityProvider>
-            <div id="a11y-root">{children}</div>
+            <div id="a11y-root">
+              {children}
+              <AssistantWidget />
+            </div>
           </AccessibilityProvider>
         </TTSProvider>
       </body>

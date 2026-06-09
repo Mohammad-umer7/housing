@@ -12,6 +12,7 @@ import { applyGovernanceRules } from '@/governance/housing-arrears'
 import type { GovernanceResult } from '@/governance/housing-arrears'
 import { updateAgentStep, type AgentName } from '@/lib/data-layer'
 import { getStructuredModel } from '@/lib/llm/client'
+import { arabicOrFallback, markFallback } from '@/lib/i18n'
 import type { SaddadStateType, SaddadNodeUpdate } from './graph-state'
 
 const RulesSchema = z.object({
@@ -108,7 +109,7 @@ Your task:
 4. You may NEVER downgrade an ESCALATED decision to APPROVED
 5. If the rules engine already rejected or escalated, confirm it — your job is to provide rationale, not override
 6. Per brief §4/§10, factor in the beneficiary's family status (family size + average income per family member): a low per-member income warrants a lighter plan. You MAY note the social category for context, but it must NOT change the decision (it is not grounds to escalate or reject)
-7. Provide formal rationale in English (rationale) and Arabic (rationale_ar) for the applicant`
+7. Provide formal rationale in English (rationale) and Arabic (rationale_ar) for the applicant. CRITICAL: "rationale_ar" MUST be written in the ARABIC language using Arabic script (العربية) — never English, Vietnamese, Chinese, or any other language.`
 
     let aiRationale = hardRules.reason
     let rationaleAr = ''
@@ -130,9 +131,12 @@ Your task:
       }
 
       aiRationale = llmResult.rationale || hardRules.reason
-      rationaleAr = llmResult.rationale_ar || ''
+      // Only keep the model's Arabic if it is genuinely Arabic (the model sometimes
+      // returns the wrong language); otherwise leave it empty so no non-Arabic text shows.
+      rationaleAr = arabicOrFallback(llmResult.rationale_ar, '')
     } catch {
       console.warn(`[RulesAgent] LLM call failed for case=${caseNumber}, using hard rules result`)
+      aiRationale = markFallback(aiRationale)
     }
 
     const govResult: GovernanceResult = {
@@ -192,10 +196,10 @@ CRITIC FLAGS: ${critique.complianceFlags.join(', ') || 'none'}`
 
     return {
       finalRationale: parsed.rationale || fallback.finalRationale,
-      finalRationaleAr: parsed.rationale_ar || rationaleAr,
+      finalRationaleAr: arabicOrFallback(parsed.rationale_ar, rationaleAr),
     }
   } catch {
     console.warn(`[RulesAgent] reconciliation LLM failed for case=${caseNumber}, using fallback`)
-    return fallback
+    return { ...fallback, finalRationale: markFallback(fallback.finalRationale) }
   }
 }

@@ -5,7 +5,6 @@ import Link from 'next/link'
 import { useTTS } from '@/lib/tts'
 import { Ico } from '@/components/saddad-ui'
 import { useA11y } from '@/components/AccessibilityProvider'
-import Dashboard from '@/components/Dashboard'
 
 function SpeakerButton({ text, lang }: { text: string; lang: 'en' | 'ar' }) {
   const { speak, activeText, enabled } = useTTS()
@@ -62,7 +61,6 @@ const SOCIAL_LABELS: Record<string, string> = {
 
 export default function OfficerPage() {
   const { t } = useA11y()
-  const [activeTab, setActiveTab] = useState<'cases' | 'dashboard'>('cases')
   const [cases, setCases] = useState<EscalatedCase[]>([])
   const [loading, setLoading] = useState(true)
   const [actionState, setActionState] = useState<ActionState>(null)
@@ -118,18 +116,8 @@ export default function OfficerPage() {
           <div className="officer-brand"><Ico.shield /> {t('Officer Portal')}</div>
           <div className="internal-tag">{t('Internal Use Only')} <span className="ar">— وزارة الطاقة والبنية التحتية</span></div>
           <div className="officer-links">
-            <button
-              onClick={() => setActiveTab('dashboard')}
-              className={activeTab === 'dashboard' ? 'active' : ''}
-            >
-              {t('Dashboard', 'لوحة المعلومات')}
-            </button>
-            <button
-              onClick={() => setActiveTab('cases')}
-              className={activeTab === 'cases' ? 'active' : ''}
-            >
-              {t('Escalated Cases', 'الحالات المصعدة')}
-            </button>
+            {/* The operations dashboard moved to the Admin portal (/admin). */}
+            <span className="active">{t('Escalated Cases', 'الحالات المصعدة')}</span>
             <Link href="/officer/feedback">{t('Citizen Feedback', 'ملاحظات المواطنين')}</Link>
             <Link href="/settings">{t('Settings')}</Link>
             <Link href="/">← {t('Back to SADDAD', 'العودة إلى سدّد')}</Link>
@@ -138,12 +126,8 @@ export default function OfficerPage() {
       </div>
 
       <div className="officer-body">
-        <div className="officer-wrap" style={activeTab === 'dashboard' ? { maxWidth: 1140 } : undefined}>
-          {activeTab === 'dashboard' ? (
-            <Dashboard />
-          ) : (
-            <>
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 20, marginBottom: 26 }}>
+        <div className="officer-wrap">
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 20, marginBottom: 26 }}>
             <div>
               <h2 style={{ fontSize: 34 }}>{t('Escalated Cases')}</h2>
               <p className="muted" style={{ marginTop: 6, fontSize: 16 }}>{t('Cases referred for officer review — requires manual decision.')}</p>
@@ -255,8 +239,6 @@ export default function OfficerPage() {
                 </Fragment>
               )
             })
-          )}
-            </>
           )}
         </div>
       </div>

@@ -89,6 +89,45 @@ export const OFFICIAL_MOEI_RULES = {
   DBR_CAP_RETIREE: 0.50, // secondary: retirees/seniors ≤ 50%
   CERT_FRESHNESS_DAYS: 30, // salary certificate must be issued within 30 days
   DEFAULT_REMAINING_LOAN_MONTHS: 60, // fallback when the servicer record has no term
+  SALARY_DISCREPANCY_THRESHOLD_PCT: 0.15, // tolerance for cert vs authority salary match (15%)
+}
+
+export type ActiveRules = typeof OFFICIAL_MOEI_RULES
+
+// Admin-configurable rule overrides. Cached for 5 minutes to avoid a DB hit on every
+// case. Cache resets when admin saves new values via the settings panel.
+let _rulesCache: ActiveRules | null = null
+let _rulesCacheAt = 0
+const RULES_CACHE_TTL_MS = 5 * 60 * 1000
+
+export function invalidateRulesCache() {
+  _rulesCache = null
+  _rulesCacheAt = 0
+}
+
+/** Load the active governance rules: DB overrides merged on top of the statutory defaults. */
+export async function loadActiveRules(): Promise<ActiveRules> {
+  if (_rulesCache && Date.now() - _rulesCacheAt < RULES_CACHE_TTL_MS) return _rulesCache
+  try {
+    // Lazy import to avoid a circular-dependency between governance and data-layer.
+    const { getGovernanceRuleOverrides } = await import('@/lib/data-layer')
+    const ov = await getGovernanceRuleOverrides()
+    _rulesCache = {
+      MAX_DEDUCTION_PERCENT:    ov.maxDeductionPercent    ?? OFFICIAL_MOEI_RULES.MAX_DEDUCTION_PERCENT,
+      MAX_INSTALLMENT_PERCENT:  ov.maxDeductionPercent    ?? OFFICIAL_MOEI_RULES.MAX_INSTALLMENT_PERCENT,
+      HARDSHIP_DEDUCTION_PERCENT: ov.hardshipDeductionPercent ?? OFFICIAL_MOEI_RULES.HARDSHIP_DEDUCTION_PERCENT,
+      HARDSHIP_PER_MEMBER_INCOME: ov.hardshipPerMemberIncome  ?? OFFICIAL_MOEI_RULES.HARDSHIP_PER_MEMBER_INCOME,
+      DBR_CAP_SALARIED:         ov.dbrCapSalaried         ?? OFFICIAL_MOEI_RULES.DBR_CAP_SALARIED,
+      DBR_CAP_RETIREE:          ov.dbrCapRetiree          ?? OFFICIAL_MOEI_RULES.DBR_CAP_RETIREE,
+      CERT_FRESHNESS_DAYS:      ov.certFreshnessDays      ?? OFFICIAL_MOEI_RULES.CERT_FRESHNESS_DAYS,
+      DEFAULT_REMAINING_LOAN_MONTHS: OFFICIAL_MOEI_RULES.DEFAULT_REMAINING_LOAN_MONTHS,
+      SALARY_DISCREPANCY_THRESHOLD_PCT: ov.salaryDiscrepancyThresholdPct ?? OFFICIAL_MOEI_RULES.SALARY_DISCREPANCY_THRESHOLD_PCT,
+    }
+    _rulesCacheAt = Date.now()
+    return _rulesCache
+  } catch {
+    return OFFICIAL_MOEI_RULES
+  }
 }
 
 export function dbrCapFor(isRetiree: boolean): number {
@@ -338,9 +377,9 @@ export function calculateReschedulingPlan(
   remainingLoanMonths: number,
   currentInstallment = 0,
   targetRate: number = OFFICIAL_MOEI_RULES.MAX_DEDUCTION_PERCENT,
-  opts: { deferArrears?: boolean } = {}
+  opts: { deferArrears?: boolean; rules?: ActiveRules } = {}
 ): ReschedulePlan {
-  const cap = OFFICIAL_MOEI_RULES.MAX_DEDUCTION_PERCENT
+  const cap = (opts.rules ?? OFFICIAL_MOEI_RULES).MAX_DEDUCTION_PERCENT
   const headroom20 = Math.round(cap * salary) - currentInstallment // max premium under the 20% ceiling
   const twentyPercentRulePass = headroom20 > 0
 
@@ -425,21 +464,22 @@ export function analyzeFinancials(
   income_changed = false,
   remaining_loan_balance_override?: number | null,
   unemployment = false,
-  temporary_circumstance = false
+  temporary_circumstance = false,
+  rules: ActiveRules = OFFICIAL_MOEI_RULES
 ): FinancialAnalysis {
   const per_member_income = Math.round(computePerMemberIncome(salary, family_size))
   const is_hardship =
-    per_member_income < OFFICIAL_MOEI_RULES.HARDSHIP_PER_MEMBER_INCOME || income_changed
+    per_member_income < rules.HARDSHIP_PER_MEMBER_INCOME || income_changed
   const target_deduction_rate = is_hardship
-    ? OFFICIAL_MOEI_RULES.HARDSHIP_DEDUCTION_PERCENT
-    : OFFICIAL_MOEI_RULES.MAX_DEDUCTION_PERCENT
+    ? rules.HARDSHIP_DEDUCTION_PERCENT
+    : rules.MAX_DEDUCTION_PERCENT
 
   // Unemployment or a verified temporary circumstance → defer arrears to the end of
   // the term with the smallest possible monthly increase (Brief Assessment Matrix).
   const defer_arrears = unemployment || temporary_circumstance
   const plan = calculateReschedulingPlan(
     arrears, salary, remaining_loan_months, current_installment, target_deduction_rate,
-    { deferArrears: defer_arrears }
+    { deferArrears: defer_arrears, rules }
   )
 
   const arrears_premium = plan.arrearsPremium

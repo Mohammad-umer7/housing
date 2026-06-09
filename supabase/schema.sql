@@ -242,3 +242,36 @@ ALTER TABLE applicants ADD COLUMN IF NOT EXISTS personal_loan_payment NUMERIC DE
 ALTER TABLE applicants ADD COLUMN IF NOT EXISTS other_obligations NUMERIC DEFAULT 0;
 -- Brief Rule 3 — existing active application (duplicate) detection signal.
 ALTER TABLE applicants ADD COLUMN IF NOT EXISTS has_active_application BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- ── System Settings (admin-configurable key-value store) ─────────────────────
+-- Persists the admin portal's chatbot custom instructions (assistant_* keys)
+-- and governance rule overrides (rule_* keys).
+
+CREATE TABLE IF NOT EXISTS system_settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL DEFAULT '',
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Pre-seed with empty custom instructions so the rows exist from day 1.
+INSERT INTO system_settings (key, value) VALUES
+  ('assistant_citizen_instructions', ''),
+  ('assistant_officer_instructions', ''),
+  ('assistant_admin_instructions',   '')
+ON CONFLICT (key) DO NOTHING;
+
+-- ── Login Log (admin user-activity tracking) ────────────────────────────────
+-- Records every successful login for audit and user-management visibility.
+
+CREATE TABLE IF NOT EXISTS login_log (
+  id           BIGSERIAL PRIMARY KEY,
+  username     TEXT,
+  role         TEXT NOT NULL,
+  case_number  TEXT,
+  display_name TEXT,
+  ip_address   TEXT,
+  logged_in_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_login_log_logged_in_at ON login_log (logged_in_at DESC);
+CREATE INDEX IF NOT EXISTS idx_login_log_role         ON login_log (role);
+CREATE INDEX IF NOT EXISTS idx_login_log_case_number  ON login_log (case_number);

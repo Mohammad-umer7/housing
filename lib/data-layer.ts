@@ -581,3 +581,148 @@ export async function getAuditLogsByCaseNumber(caseNumber: string) {
     .order('timestamp', { ascending: false })
   return data ?? []
 }
+
+// ── Uploaded Document Retrieval ───────────────────────────────────────────────
+
+// Returns the base64-encoded PDF that was uploaded with a submission, or null
+// if no document was attached. Reads form_data from the most recent job_queue
+// row for the case (completed rows are kept — never deleted after processing).
+export async function getJobFormDataBase64(caseNumber: string): Promise<string | null> {
+  const { data } = await supabaseAdmin
+    .from('job_queue')
+    .select('form_data')
+    .eq('case_number', caseNumber)
+    .order('queued_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (!data) return null
+  const fd = data.form_data as Record<string, unknown> | null
+  if (!fd || typeof fd.pdfBase64 !== 'string' || !fd.pdfBase64) return null
+  return fd.pdfBase64
+}
+
+// ── System Settings (admin-configurable key-value store) ─────────────────────
+// Used to persist admin-edited chatbot custom instructions per role and the
+// governance rule overrides. The system_settings table may not exist in all
+// environments — all functions are fail-open (return null / skip silently) so
+// the app keeps working.
+
+export async function getSystemSetting(key: string): Promise<string | null> {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('system_settings')
+      .select('value')
+      .eq('key', key)
+      .maybeSingle()
+    if (error) return null
+    return (data?.value as string | null) ?? null
+  } catch {
+    return null
+  }
+}
+
+export async function saveSystemSetting(key: string, value: string): Promise<void> {
+  try {
+    const { error } = await supabaseAdmin
+      .from('system_settings')
+      .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' })
+    if (error) console.warn(`[saveSystemSetting] ${key}: ${error.message}`)
+  } catch (err) {
+    console.warn('[saveSystemSetting] failed:', err)
+  }
+}
+
+// ── Login Log ─────────────────────────────────────────────────────────────────
+
+export async function logLogin(data: {
+  username: string
+  role: string
+  caseNumber?: string | null
+  displayName?: string | null
+  ipAddress?: string | null
+}): Promise<void> {
+  try {
+    await supabaseAdmin.from('login_log').insert({
+      username:     data.username,
+      role:         data.role,
+      case_number:  data.caseNumber ?? null,
+      display_name: data.displayName ?? null,
+      ip_address:   data.ipAddress ?? null,
+      logged_in_at: new Date().toISOString(),
+    })
+  } catch (err) {
+    // Login logging is best-effort — never block the sign-in flow
+    console.warn('[logLogin] failed:', err)
+  }
+}
+
+export type LoginLogEntry = {
+  id: number
+  username: string | null
+  role: string
+  case_number: string | null
+  display_name: string | null
+  ip_address: string | null
+  logged_in_at: string
+}
+
+export async function getLoginLogs(opts?: {
+  limit?: number
+  role?: string
+  caseNumber?: string
+}): Promise<LoginLogEntry[]> {
+  let q = supabaseAdmin
+    .from('login_log')
+    .select('*')
+    .order('logged_in_at', { ascending: false })
+    .limit(opts?.limit ?? 200)
+  if (opts?.role) q = q.eq('role', opts.role)
+  if (opts?.caseNumber) q = q.eq('case_number', opts.caseNumber)
+  const { data } = await q
+  return (data ?? []) as LoginLogEntry[]
+}
+
+// ── Governance Rules (admin-configurable, DB overrides hardcoded defaults) ───
+
+export type GovernanceRuleOverrides = {
+  maxDeductionPercent?: number
+  hardshipDeductionPercent?: number
+  hardshipPerMemberIncome?: number
+  certFreshnessDays?: number
+  dbrCapSalaried?: number
+  dbrCapRetiree?: number
+  salaryDiscrepancyThresholdPct?: number
+}
+
+const RULE_KEYS: (keyof GovernanceRuleOverrides)[] = [
+  'maxDeductionPercent',
+  'hardshipDeductionPercent',
+  'hardshipPerMemberIncome',
+  'certFreshnessDays',
+  'dbrCapSalaried',
+  'dbrCapRetiree',
+  'salaryDiscrepancyThresholdPct',
+]
+
+export async function getGovernanceRuleOverrides(): Promise<GovernanceRuleOverrides> {
+  const overrides: GovernanceRuleOverrides = {}
+  for (const key of RULE_KEYS) {
+    const raw = await getSystemSetting(`rule_${key}`)
+    if (raw !== null && raw.trim() !== '') {
+      const n = Number(raw)
+      if (Number.isFinite(n)) (overrides as Record<string, number>)[key] = n
+    }
+  }
+  return overrides
+}
+
+export async function saveGovernanceRuleOverrides(data: GovernanceRuleOverrides): Promise<void> {
+  const saves: Promise<void>[] = []
+  for (const key of RULE_KEYS) {
+    const val = (data as Record<string, unknown>)[key]
+    if (val !== undefined && val !== null) {
+      saves.push(saveSystemSetting(`rule_${key}`, String(val)))
+    }
+  }
+  await Promise.all(saves)
+}

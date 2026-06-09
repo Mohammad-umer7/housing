@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { signSession, SESSION_COOKIE, SESSION_DURATION_MS, type Role } from '@/lib/auth/session'
 import { successResponse, errorResponse } from '@/lib/api-response'
 import { checkRateLimit } from '@/lib/middleware/auth'
+import { logLogin } from '@/lib/data-layer'
 
 type User = { username: string; password: string; role: Role }
 
@@ -45,6 +46,8 @@ export async function POST(req: NextRequest) {
   if (!user) {
     return NextResponse.json(errorResponse('Invalid credentials', 401), { status: 401 })
   }
+
+  void logLogin({ username: user.username, role: user.role, ipAddress: ip })
 
   const token = await signSession({ role: user.role, username: user.username })
   const response = NextResponse.json(successResponse({ role: user.role, username: user.username }))

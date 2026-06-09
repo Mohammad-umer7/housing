@@ -7,9 +7,10 @@ import { useA11y } from '@/components/AccessibilityProvider'
 
 // SADDAD sign-in (MOEI design). Citizens "sign in with UAE PASS" by entering their
 // Application ID — we authenticate (demo session) and validate the ID against the real
-// lookup, then carry it to the Submit wizard. Officers sign in with credentials.
+// lookup, then carry it to the Submit wizard. Officers and admins sign in with their
+// own credentials (separate entry points — they land on different portals).
 // Production swaps the demo session for a real UAE PASS OIDC flow.
-type Modal = null | 'uaepass' | 'officer' | 'whatis'
+type Modal = null | 'uaepass' | 'officer' | 'admin' | 'whatis'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -77,7 +78,9 @@ export default function LoginPage() {
         return
       }
       sessionStorage.setItem('saddad_logged_in', 'true')
-      router.push('/officer')
+      // Route by the role the credentials actually carry (admin creds entered in the
+      // officer modal still land on /admin, and vice versa — never a dead end).
+      router.push(data.data?.role === 'admin' ? '/admin' : '/officer')
       router.refresh()
     } catch {
       setErrorMsg('Could not reach the sign-in service.')
@@ -123,9 +126,14 @@ export default function LoginPage() {
         </a>
       </div>
 
-      <button className="officer-btn" onClick={() => setActiveModal('officer')}>
-        {t('Continue as an Officer')}
-      </button>
+      <div className="staff-btn-row">
+        <button className="officer-btn" onClick={() => setActiveModal('officer')}>
+          {t('Continue as an Officer')}
+        </button>
+        <button className="officer-btn" onClick={() => setActiveModal('admin')}>
+          {t('Continue as an Admin')}
+        </button>
+      </div>
 
       {/* UAE PASS LOGIN MODAL */}
       {activeModal === 'uaepass' && (
@@ -163,21 +171,23 @@ export default function LoginPage() {
         </div>
       )}
 
-      {/* OFFICER LOGIN MODAL */}
-      {activeModal === 'officer' && (
+      {/* OFFICER / ADMIN LOGIN MODALS (separate entry points, shared form logic) */}
+      {(activeModal === 'officer' || activeModal === 'admin') && (
         <div className="modal-backdrop" onClick={closeModal}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <button className="modal-close" onClick={closeModal}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
             </button>
             <div className="modal-title">
-              <Ico.shield width={20} height={20} style={{ color: 'var(--gold)', marginRight: 8, flexShrink: 0 }} />
-              {t('Officer Login')}
+              {activeModal === 'officer'
+                ? <Ico.shield width={20} height={20} style={{ color: 'var(--gold)', marginRight: 8, flexShrink: 0 }} />
+                : <Ico.building width={20} height={20} style={{ color: 'var(--gold)', marginRight: 8, flexShrink: 0 }} />}
+              {activeModal === 'officer' ? t('Officer Login') : t('Admin Login')}
             </div>
             <form className="modal-form" onSubmit={handleOffSubmit}>
               <div className="field">
-                <label>{t('Officer Username / ID')}</label>
-                <input type="text" className="input" required placeholder="e.g. officer" value={offUser} onChange={(e) => setOffUser(e.target.value)} />
+                <label>{activeModal === 'officer' ? t('Officer Username / ID') : t('Admin Username / ID')}</label>
+                <input type="text" className="input" required placeholder={activeModal === 'officer' ? 'e.g. officer' : 'e.g. admin'} value={offUser} onChange={(e) => setOffUser(e.target.value)} />
               </div>
               <div className="field">
                 <label>{t('Password')}</label>

@@ -13,6 +13,7 @@ import { z } from 'zod'
 import { StateGraph, MessagesAnnotation, START } from '@langchain/langgraph'
 import { ToolNode, toolsCondition } from '@langchain/langgraph/prebuilt'
 import { getToolCallingModel, getStructuredModel } from '@/lib/llm/client'
+import { markFallback } from '@/lib/i18n'
 import { updateAgentStep, getSimilarCases, getAuditLogsByCaseNumber, type AgentName } from '@/lib/data-layer'
 import type { SaddadStateType, SaddadNodeUpdate } from './graph-state'
 import type { CriticReview, CriticVerdict } from './types'
@@ -88,7 +89,7 @@ export async function criticNode(state: SaddadStateType): Promise<SaddadNodeUpda
   const defaultReview: CriticReview = {
     verdict: 'APPROVE_AS_IS',
     complianceFlags: [],
-    reasoning: 'Critic unavailable — proposed decision stands.',
+    reasoning: markFallback('Critic unavailable — proposed decision stands.'),
     finalDecision: proposedDecision,
     overrodeRules: false,
     toolsUsed: [],

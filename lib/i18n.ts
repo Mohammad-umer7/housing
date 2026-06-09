@@ -6,6 +6,34 @@
 // Add a new translatable string by wrapping it with t('English text') in a component and
 // adding an entry below. See components/AccessibilityProvider.tsx → t().
 
+// LLMs (Llama, etc.) occasionally return the WRONG language for a field we asked to be
+// Arabic — Vietnamese, Chinese, English, … isArabicText detects this so callers can
+// reject it: the citizen must NEVER see a non-Arabic string in an "Arabic" section.
+export function isArabicText(s: string | null | undefined): boolean {
+  const t = String(s ?? '').trim()
+  if (!t) return false
+  // Arabic block + Arabic Supplement/Extended-A + presentation forms.
+  const arabic = (t.match(/[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]/g) || []).length
+  const letters = (t.match(/\p{L}/gu) || []).length
+  return letters > 0 && arabic / letters >= 0.5
+}
+
+// Demo/debug transparency: when MARK_FALLBACKS=true, prefix any deterministic (non-LLM)
+// fallback text with "(fallback)" so you can tell at a glance whether the LLM actually
+// produced the text or the system fell back. Set MARK_FALLBACKS=false (or unset) for the
+// real demo so citizens never see the marker.
+export function markFallback(text: string | null | undefined): string {
+  const t = String(text ?? '')
+  if (!t || process.env.MARK_FALLBACKS !== 'true') return t
+  return `(fallback) ${t}`
+}
+
+// Use the LLM's Arabic only if it is genuinely Arabic; otherwise the known-Arabic
+// fallback (tagged via markFallback so a swapped-in Arabic string is visible too).
+export function arabicOrFallback(candidate: string | null | undefined, fallback: string): string {
+  return isArabicText(candidate) ? String(candidate).trim() : markFallback(fallback)
+}
+
 export const AR: Record<string, string> = {
   // ── Common / chrome ─────────────────────────────────────────────
   Submit: 'إرسال',

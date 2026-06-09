@@ -12,6 +12,7 @@ import { z } from 'zod'
 import { updateAgentStep, type AgentName } from '@/lib/data-layer'
 import { executeNotificationTool } from '@/tools/notification-tools'
 import { getStructuredModel } from '@/lib/llm/client'
+import { markFallback } from '@/lib/i18n'
 import { toRecommendation, type GovernanceDecision } from '@/governance/housing-arrears'
 import type { SaddadStateType, SaddadNodeUpdate } from './graph-state'
 
@@ -104,6 +105,7 @@ Write greeting, explanation and next_steps for this applicant.`
       }
     } catch {
       console.warn(`[CommunicationAgent] LLM compose failed for case=${caseNumber}, using deterministic message`)
+      parts = { ...parts, greeting: markFallback(parts.greeting) }
     }
 
     // ── Assemble the final, professional WhatsApp message (deterministic structure).

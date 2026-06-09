@@ -12,6 +12,7 @@ import { StateGraph, MessagesAnnotation, START } from '@langchain/langgraph'
 import { ToolNode, toolsCondition } from '@langchain/langgraph/prebuilt'
 import { getToolCallingModel, getStructuredModel } from '@/lib/llm/client'
 import { updateAgentStep, type AgentName } from '@/lib/data-layer'
+import { arabicOrFallback, markFallback } from '@/lib/i18n'
 import {
   RECOVERY_TOOLS,
   computeAffordableTargets,
@@ -126,7 +127,8 @@ Rules:
 - Be concrete and use EXACT numbers from the tools — never invent figures.
 - One step per blocker. Be respectful and practical; this is a citizen, not an adversary.
 - If the only path is officer review (e.g. priority/hardship or a prior default), say so plainly and reassure them.
-- Output the final guidance in English (summary) and Arabic (summary_ar) plus a list of steps.`
+- Output the final guidance in English (summary) and Arabic (summary_ar) plus a list of steps.
+- CRITICAL: "summary_ar" MUST be written in the ARABIC language using Arabic script (العربية) — never English, Vietnamese, Chinese, or any other language.`
 
     const userContext = `CASE: ${caseNumber}
 DECISION: ${finalDecision}
@@ -155,10 +157,13 @@ Call the tools as needed, then produce the recovery guidance.`
         blockers,
         steps,
         summary: parsed.summary || plan.summary,
-        summaryAr: parsed.summary_ar || plan.summaryAr,
+        // Guard against the model returning a non-Arabic language in the Arabic field —
+        // fall back to the deterministic Arabic guidance if so.
+        summaryAr: arabicOrFallback(parsed.summary_ar, plan.summaryAr),
       }
     } catch (llmErr) {
       console.warn(`[RecoveryAgent] LLM failed for case=${caseNumber}, using deterministic plan`, llmErr)
+      plan = { ...plan, summary: markFallback(plan.summary), summaryAr: markFallback(plan.summaryAr) }
     }
 
     const duration = Date.now() - start

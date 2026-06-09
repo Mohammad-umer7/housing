@@ -2,7 +2,7 @@
 // Deterministic (no LLM) so the money math is identical on every run for audit
 // reproducibility. Reads the merged applicant record from state.
 
-import { analyzeFinancials, classifyRequestCircumstances } from '@/governance/housing-arrears'
+import { analyzeFinancials, classifyRequestCircumstances, loadActiveRules } from '@/governance/housing-arrears'
 import { updateAgentStep, type AgentName } from '@/lib/data-layer'
 import type { SaddadStateType, SaddadNodeUpdate } from './graph-state'
 
@@ -35,6 +35,10 @@ export async function financialNode(state: SaddadStateType): Promise<SaddadNodeU
     const remainingLoanBalance =
       Number(applicant.remaining_loan_balance) > 0 ? Number(applicant.remaining_loan_balance) : null
 
+    // Load admin-configured rule overrides (DB values override statutory defaults).
+    // The cache means this is effectively free after the first call per deploy.
+    const rules = await loadActiveRules()
+
     const financials = analyzeFinancials(
       arrears,
       salary,
@@ -49,6 +53,7 @@ export async function financialNode(state: SaddadStateType): Promise<SaddadNodeU
       remainingLoanBalance,
       circ.unemployment,
       circ.temporary_circumstance,
+      rules,
     )
 
     const duration = Date.now() - start
