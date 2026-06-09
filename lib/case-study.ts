@@ -38,17 +38,15 @@ export function buildCaseStudy(params: {
   const maritalLabel = marital ? `${marital[0].toUpperCase()}${marital.slice(1)}` : 'UAE national'
   const decision = (finalDecision || govResult.decision) as 'APPROVED' | 'REJECTED' | 'ESCALATED'
 
-  // Distinguish a FRAUD/authenticity concern (mismatch / vision-suspicious / tampered)
-  // from a RECOVERABLE document gap (missing or invalid/unverifiable). Fraud must go to a
-  // HUMAN ("Refer to Employee" — don't just ask the citizen to resubmit); a recoverable
-  // gap becomes "Request Documents" so the citizen can upload the right file. A REJECTED
-  // decision is a hard "Reject" only for a duplicate active application (G-00); a
-  // missing-documents rejection (G-01) is a recoverable "Request Documents".
-  const auth = String(applicant.document_authenticity ?? 'skipped')
-  const fraudDocIssue = auth === 'mismatch' || auth === 'suspicious' || auth === 'tampered'
-  const recoverableDocIssue = !documentsComplete || auth === 'invalid' || auth === 'unverifiable'
-  let recommendation = toRecommendation(decision, govResult.rule_triggered)
-  if (decision === 'ESCALATED' && recoverableDocIssue && !fraudDocIssue) recommendation = 'Request Documents'
+  // The recommendation always mirrors the final decision so the citizen card is never
+  // self-contradictory. The document agent already routed the case correctly upstream:
+  //   • a wrong / missing / invalid / mismatched document → REJECTED (G-01) → "Request
+  //     Documents" (the citizen re-uploads the right file)
+  //   • a VALID document with an authenticity concern (vision-suspicious / tampered) →
+  //     APPROVED-then-escalated by the Critic → "Refer to Employee" (a human reviews it)
+  // So: APPROVED→Approve, ESCALATED→Refer to Employee, REJECTED→Reject (G-00 duplicate)
+  // or Request Documents (G-01).
+  const recommendation = toRecommendation(decision, govResult.rule_triggered)
 
   return {
     applicationStatus: documentsComplete ? 'Complete' : 'Incomplete',

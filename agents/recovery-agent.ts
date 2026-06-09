@@ -10,7 +10,7 @@
 import { z } from 'zod'
 import { StateGraph, MessagesAnnotation, START } from '@langchain/langgraph'
 import { ToolNode, toolsCondition } from '@langchain/langgraph/prebuilt'
-import { getChatModel, getStructuredModel } from '@/lib/llm/client'
+import { getToolCallingModel, getStructuredModel } from '@/lib/llm/client'
 import { updateAgentStep, type AgentName } from '@/lib/data-layer'
 import {
   RECOVERY_TOOLS,
@@ -81,7 +81,7 @@ const RecoverySchema = z.object({
 })
 
 function buildRecoverySubgraph() {
-  const model = getChatModel({ temperature: 0.2, maxTokens: 700 }).bindTools(RECOVERY_TOOLS)
+  const model = getToolCallingModel(RECOVERY_TOOLS, { temperature: 0.2, maxTokens: 700 })
   const toolNode = new ToolNode(RECOVERY_TOOLS)
   async function agentNode(s: typeof MessagesAnnotation.State) {
     const res = await model.invoke(s.messages)

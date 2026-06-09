@@ -12,7 +12,7 @@ import { tool } from '@langchain/core/tools'
 import { z } from 'zod'
 import { StateGraph, MessagesAnnotation, START } from '@langchain/langgraph'
 import { ToolNode, toolsCondition } from '@langchain/langgraph/prebuilt'
-import { getChatModel, getStructuredModel } from '@/lib/llm/client'
+import { getToolCallingModel, getStructuredModel } from '@/lib/llm/client'
 import { updateAgentStep, getSimilarCases, getAuditLogsByCaseNumber, type AgentName } from '@/lib/data-layer'
 import type { SaddadStateType, SaddadNodeUpdate } from './graph-state'
 import type { CriticReview, CriticVerdict } from './types'
@@ -61,7 +61,7 @@ const CriticVerdictSchema = z.object({
 
 // The Critic's tool-using subgraph: agent ↔ tools loop.
 function buildCriticSubgraph() {
-  const model = getChatModel({ temperature: 0, maxTokens: 600 }).bindTools(CRITIC_TOOLS)
+  const model = getToolCallingModel(CRITIC_TOOLS, { temperature: 0, maxTokens: 600 })
   const toolNode = new ToolNode(CRITIC_TOOLS)
 
   async function agentNode(s: typeof MessagesAnnotation.State) {
@@ -189,8 +189,15 @@ Review the case, calling tools if useful, then give your verdict.`
         ['human', 'Now output your final verdict as structured data.'],
       ])
 
-      const verdict: CriticVerdict = parsed.verdict === 'FORCE_ESCALATE' ? 'FORCE_ESCALATE' : 'APPROVE_AS_IS'
-      const finalDecision = verdict === 'FORCE_ESCALATE' ? 'ESCALATED' : proposedDecision
+      // The Critic only vetoes a risky APPROVAL → officer review. It must NOT turn a
+      // documents-request or a rejection into an officer escalation — a "Request
+      // Documents" (G-01: wrong / missing / mismatched document) and a hard "Reject"
+      // (G-00 duplicate) are final citizen-facing outcomes the citizen acts on, not
+      // cases for an officer. (An already-ESCALATED decision is confirmed earlier and
+      // never reaches here.) So a veto only takes effect when the proposal is APPROVED.
+      const wantsEscalate = parsed.verdict === 'FORCE_ESCALATE' && proposedDecision === 'APPROVED'
+      const verdict: CriticVerdict = wantsEscalate ? 'FORCE_ESCALATE' : 'APPROVE_AS_IS'
+      const finalDecision = wantsEscalate ? 'ESCALATED' : proposedDecision
       review = {
         verdict,
         complianceFlags: Array.isArray(parsed.complianceFlags) ? parsed.complianceFlags.slice(0, 5) : [],
