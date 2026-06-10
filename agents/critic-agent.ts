@@ -152,8 +152,8 @@ RULE TRIGGERED: ${govResult.rule_triggered}
 RULE RATIONALE: ${govResult.reason}
 FAIRNESS: ${fairnessResult.consistencyScore}% consistency across ${fairnessResult.similarCasesFound} similar cases (${fairnessResult.consistencyFlag ? 'CONSISTENT' : 'FLAGGED'})
 PLANNER STRATEGY: ${plannerStrategy}${plannerStrategy === 'DEEP_REVIEW' ? ' — scrutinise aggressively; prefer to call your lookup tools before approving' : ''}
-DOCUMENT SALARY MISMATCH: ${applicant.document_salary_mismatch ? 'YES — the salary certificate disagrees with the declared salary by >10%. This is a concrete data-quality / fraud red flag the mechanical rules did not catch; treat it as strong grounds to FORCE_ESCALATE.' : 'no'}
-CERTIFICATE VERIFICATION (uploaded certificate vs issuing-authority record, DB-2): ${applicant.document_authenticity ?? 'skipped'}${applicant.document_authenticity && applicant.document_authenticity !== 'verified' && applicant.document_authenticity !== 'skipped' ? ` — ${applicant.document_authority_reason}. The certificate FAILED authority verification; this is strong grounds to FORCE_ESCALATE.` : ''}
+DOCUMENT SALARY MISMATCH: ${applicant.document_salary_mismatch ? 'YES — the document salary disagrees with the beneficiary record. This is a concrete data-quality / fraud red flag the mechanical rules did not catch; treat it as strong grounds to FORCE_ESCALATE.' : 'no'}
+DOCUMENT VERIFICATION (uploaded document vs Programme/authority record + AI vision review): ${applicant.document_authenticity ?? 'skipped'}${applicant.document_authenticity && applicant.document_authenticity !== 'verified' && applicant.document_authenticity !== 'skipped' ? ` — ${applicant.document_authority_reason}. The document FAILED verification; this is strong grounds to FORCE_ESCALATE.` : ''}
 
 FINANCIALS:
 - Salary: AED ${(applicant.monthly_salary as number)?.toLocaleString?.() ?? '?'}
@@ -211,17 +211,21 @@ Review the case, calling tools if useful, then give your verdict.`
       console.warn(`[CriticAgent] subgraph/LLM failed for case=${caseNumber}, approving as-is`, llmErr)
     }
 
-    // Deterministic guard: a certificate that FAILED authority verification (QR not
-    // recognised, tampered salary, or missing QR) must escalate regardless of what
-    // the LLM concluded. Only upgrades APPROVED → ESCALATED; never softens a hard
-    // REJECTED/ESCALATED. overrodeRules=true triggers the reconcile rationale step.
+    // Deterministic guard: a document that FAILED verification (DB cross-check
+    // mismatch, vision flagged it as fabricated, internally inconsistent figures, or
+    // no record to validate an income document against) must escalate to a HUMAN
+    // OFFICER regardless of what the LLM concluded — the citizen is never auto-
+    // rejected for a document-authenticity problem. Only upgrades APPROVED →
+    // ESCALATED; never softens a hard REJECTED/ESCALATED. overrodeRules=true triggers
+    // the reconcile rationale step so the citizen-facing rationale explains the
+    // referral, and the officer sees the same reasoning + full verification report.
     const authenticity = String(applicant.document_authenticity ?? 'skipped')
     if (proposedDecision === 'APPROVED' && authenticity !== 'verified' && authenticity !== 'skipped') {
       const flag =
-        authenticity === 'mismatch' ? 'certificate_content_mismatch'
+        authenticity === 'mismatch' ? 'document_content_mismatch_vs_record'
         : authenticity === 'suspicious' ? 'document_appears_fabricated_vision'
         : authenticity === 'tampered' ? 'document_tampering_detected'
-        : authenticity === 'invalid' ? 'not_a_valid_salary_certificate'
+        : authenticity === 'invalid' ? 'not_the_requested_document'
         : authenticity === 'unverifiable' ? 'no_authority_salary_record'
         : 'document_verification_failed'
       review = {
@@ -229,7 +233,7 @@ Review the case, calling tools if useful, then give your verdict.`
         complianceFlags: Array.from(new Set([flag, ...review.complianceFlags])).slice(0, 5),
         reasoning: String(
           applicant.document_authority_reason ||
-          'The salary certificate could not be authenticated against the issuing authority.'
+          'The uploaded document could not be authenticated against the issuing authority.'
         ),
         finalDecision: 'ESCALATED',
         overrodeRules: true,

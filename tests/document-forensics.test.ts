@@ -1,9 +1,9 @@
 import {
-  parsePdfMetadata,
   checkStructure,
   checkArithmetic,
   extractEmiratesId,
   buildVerificationReport,
+  type VisionAssessment,
 } from '../lib/document-forensics'
 import type { AuthorityRecord } from '../lib/integrations/document-authority'
 
@@ -26,30 +26,58 @@ const GENUINE_TEXT =
   'as a Senior Engineer. Monthly Basic Salary: AED 9,000 Allowances: AED 6,000 Gross Monthly Salary: AED 15,000 ' +
   'Authorized Signatory HR Department'
 
+const NON_WORK_TEXT =
+  'TO WHOM IT MAY CONCERN. This letter confirms the termination / end of service of Mr. Salem Saif Al Ameri, ' +
+  'Emirates ID 784-1988-2341567-3, effective 01/05/2026. He is no longer employed with our establishment. ' +
+  'HR Department. Date: 20/05/2026'
+
 function inputs(over: Partial<Parameters<typeof buildVerificationReport>[0]> = {}) {
   return {
+    expectedType: 'salary_certificate' as const,
     record: RECORD,
     declaredSalary: 15000,
     extracted: { salary: 15000, name: 'Salem Saif Al Ameri', employer: 'ADNOC', emiratesId: '784-1988-2341567-3' },
-    structure: checkStructure(GENUINE_TEXT),
+    structure: checkStructure(GENUINE_TEXT, 'salary_certificate'),
     arithmetic: checkArithmetic(GENUINE_TEXT),
-    metadata: {
-      creationDate: 'D:20260520120000', modDate: null, producer: 'PDFKit', creator: 'PDFKit',
-      eofCount: 1, modifiedAfterCreation: false, incrementalUpdate: false,
+    ...over,
+  }
+}
+
+function vision(over: Partial<VisionAssessment> = {}): VisionAssessment {
+  return {
+    verdict: 'authentic',
+    confidence: 90,
+    reasons: [],
+    matchesExpectedType: true,
+    observed: {
+      documentType: 'salary certificate',
+      salary: null,
+      employeeName: null,
+      employerName: null,
+      issueDate: null,
+      ...(over.observed ?? {}),
     },
     ...over,
   }
 }
 
-describe('checkStructure', () => {
+describe('checkStructure (doc-type aware)', () => {
   test('recognises a genuine salary certificate layout', () => {
-    const s = checkStructure(GENUINE_TEXT)
-    expect(s.looksLikeSalaryCertificate).toBe(true)
+    const s = checkStructure(GENUINE_TEXT, 'salary_certificate')
+    expect(s.looksLikeExpectedDoc).toBe(true)
     expect(s.found).toBeGreaterThanOrEqual(4)
   })
-  test('rejects an unrelated document', () => {
-    const s = checkStructure('This is a tenancy contract between landlord and tenant.')
-    expect(s.looksLikeSalaryCertificate).toBe(false)
+  test('rejects an unrelated document for the salary-certificate profile', () => {
+    const s = checkStructure('This is a tenancy contract between landlord and tenant.', 'salary_certificate')
+    expect(s.looksLikeExpectedDoc).toBe(false)
+  })
+  test('recognises a termination letter when a non-work letter is expected', () => {
+    const s = checkStructure(NON_WORK_TEXT, 'non_work_letter')
+    expect(s.looksLikeExpectedDoc).toBe(true)
+  })
+  test('a salary certificate does NOT satisfy the non-work-letter profile', () => {
+    const s = checkStructure(GENUINE_TEXT, 'non_work_letter')
+    expect(s.looksLikeExpectedDoc).toBe(false)
   })
 })
 
@@ -66,24 +94,6 @@ describe('checkArithmetic', () => {
   })
 })
 
-describe('parsePdfMetadata', () => {
-  test('detects an incremental update (multiple EOF markers)', () => {
-    const m = parsePdfMetadata('%PDF-1.3\n/Producer (PDFKit)\n/CreationDate (D:20260520120000)\n%%EOF\n%%EOF\n')
-    expect(m.eofCount).toBe(2)
-    expect(m.incrementalUpdate).toBe(true)
-    expect(m.producer).toBe('PDFKit')
-  })
-  test('detects modification after creation', () => {
-    const m = parsePdfMetadata('/CreationDate (D:20260520120000)\n/ModDate (D:20260601120000)\n%%EOF\n')
-    expect(m.modifiedAfterCreation).toBe(true)
-  })
-  test('clean single-revision file is not flagged', () => {
-    const m = parsePdfMetadata('/CreationDate (D:20260520120000)\n%%EOF\n')
-    expect(m.incrementalUpdate).toBe(false)
-    expect(m.modifiedAfterCreation).toBe(false)
-  })
-})
-
 describe('extractEmiratesId', () => {
   test('pulls and normalises the Emirates ID', () => {
     expect(extractEmiratesId('holding Emirates ID 784-1988-2341567-3, is employed'))
@@ -97,7 +107,7 @@ describe('buildVerificationReport', () => {
     expect(r.verdict).toBe('verified')
     expect(r.confidenceScore).toBeGreaterThanOrEqual(95)
   })
-  test('salary mismatch vs authority → mismatch', () => {
+  test('salary mismatch vs authority → mismatch (officer escalation, not citizen bounce)', () => {
     const r = buildVerificationReport(inputs({ extracted: { salary: 45000, name: 'Salem Saif Al Ameri', employer: 'ADNOC', emiratesId: '784-1988-2341567-3' }, declaredSalary: 45000 }))
     expect(r.verdict).toBe('mismatch')
   })
@@ -105,33 +115,57 @@ describe('buildVerificationReport', () => {
     const r = buildVerificationReport(inputs({ extracted: { salary: 15000, name: 'Salem Saif Al Ameri', employer: 'ADNOC', emiratesId: '784-0000-0000000-0' } }))
     expect(r.verdict).toBe('mismatch')
   })
-  test('edited file (incremental update) but valid QR + salary → tampered', () => {
-    const r = buildVerificationReport(inputs({
-      metadata: { creationDate: 'D:20260520120000', modDate: null, producer: 'PDFKit', creator: 'PDFKit', eofCount: 2, modifiedAfterCreation: false, incrementalUpdate: true },
-    }))
-    expect(r.verdict).toBe('tampered')
-  })
   test('figures that do not reconcile → tampered', () => {
     const r = buildVerificationReport(inputs({
-      arithmetic: checkArithmetic('Basic Salary: AED 20,000 Allowances: AED 6,000 Gross Monthly Salary: AED 15,000'),
+      arithmetic: checkArithmetic('Basic Salary: AED 5,000 Allowances: AED 6,000 Gross Monthly Salary: AED 15,000'),
     }))
     expect(r.verdict).toBe('tampered')
   })
-  test('no authority record for this beneficiary → unverifiable', () => {
+  test('no authority record for an income document → unverifiable', () => {
     const r = buildVerificationReport(inputs({ record: null }))
     expect(r.verdict).toBe('unverifiable')
   })
 
-  test('a non-certificate PDF (wrong document) → invalid, low confidence', () => {
+  test('wrong document type (anchors fallback) → invalid, low confidence', () => {
     const r = buildVerificationReport(inputs({
-      structure: checkStructure('This is a residential tenancy contract between landlord and tenant.'),
+      structure: checkStructure('This is a residential tenancy contract between landlord and tenant.', 'salary_certificate'),
       arithmetic: checkArithmetic('no salary figures here'),
       extracted: { salary: null, name: null, employer: null, emiratesId: null },
     }))
     expect(r.verdict).toBe('invalid')
     expect(r.confidenceScore).toBeLessThan(50)
-    // the content fields must NOT be scored as passing for a non-certificate
+    // the content fields must NOT be scored as passing for a wrong-type file
     expect(r.checks.find((c) => c.id === 'salary_match')!.status).toBe('na')
+  })
+
+  test('fabricated file flagged by vision AND judged wrong-type → suspicious (escalate), not a citizen bounce', () => {
+    const r = buildVerificationReport(inputs({
+      vision: vision({
+        verdict: 'likely_fake',
+        matchesExpectedType: false,
+        reasons: ['sparse file with only a name and salary figure'],
+        observed: { documentType: null, salary: null, employeeName: null, employerName: null, issueDate: null },
+      }),
+    }))
+    expect(r.verdict).toBe('suspicious')
+  })
+
+  test('vision says WRONG type → invalid even when anchors accidentally pass', () => {
+    const r = buildVerificationReport(inputs({
+      vision: vision({ matchesExpectedType: false, observed: { documentType: 'bank statement', salary: null, employeeName: null, employerName: null, issueDate: null } }),
+    }))
+    expect(r.verdict).toBe('invalid')
+    expect(r.summary).toMatch(/bank statement/i)
+  })
+
+  test('vision confirms type → NOT invalid even when the text anchors fail (scanned file)', () => {
+    const r = buildVerificationReport(inputs({
+      structure: null, // scanned PDF — no text layer
+      extracted: { salary: null, name: null, employer: null, emiratesId: null },
+      arithmetic: null,
+      vision: vision({ observed: { documentType: 'salary certificate', salary: 15000, employeeName: 'Salem Saif Al Ameri', employerName: 'ADNOC', issueDate: null } }),
+    }))
+    expect(r.verdict).toBe('verified')
   })
 
   test('certificate with no readable salary → salary check N/A, not a false pass', () => {
@@ -140,6 +174,34 @@ describe('buildVerificationReport', () => {
       declaredSalary: 15000,
     }))
     expect(r.checks.find((c) => c.id === 'salary_match')!.status).toBe('na')
-    expect(r.verdict).toBe('verified') // structure + identity + metadata still validate it
+    expect(r.verdict).toBe('verified') // type + identity still validate it
+  })
+
+  test('non-work letter: salary/arithmetic are N/A and no record ≠ unverifiable', () => {
+    const r = buildVerificationReport({
+      expectedType: 'non_work_letter',
+      record: null, // an unemployed beneficiary may have no salary record — that is fine
+      declaredSalary: null,
+      extracted: { salary: null, name: 'Salem Saif Al Ameri', employer: null, emiratesId: '784-1988-2341567-3' },
+      structure: checkStructure(NON_WORK_TEXT, 'non_work_letter'),
+      arithmetic: null,
+      vision: vision({ observed: { documentType: 'termination letter', salary: null, employeeName: 'Salem Saif Al Ameri', employerName: null, issueDate: '20/05/2026' } }),
+    })
+    expect(r.verdict).toBe('verified')
+    expect(r.checks.find((c) => c.id === 'salary_match')!.status).toBe('na')
+    expect(r.checks.find((c) => c.id === 'arithmetic')!.status).toBe('na')
+  })
+
+  test('non-work letter judged fake by vision → suspicious', () => {
+    const r = buildVerificationReport({
+      expectedType: 'non_work_letter',
+      record: null,
+      declaredSalary: null,
+      extracted: { salary: null, name: null, employer: null, emiratesId: null },
+      structure: checkStructure(NON_WORK_TEXT, 'non_work_letter'),
+      arithmetic: null,
+      vision: vision({ verdict: 'suspicious', reasons: ['placeholder text only'] }),
+    })
+    expect(r.verdict).toBe('suspicious')
   })
 })

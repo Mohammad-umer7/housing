@@ -22,6 +22,25 @@ import {
 import type { SaddadStateType, SaddadNodeUpdate } from './graph-state'
 import type { RecoveryPlan, RecoveryStep } from './types'
 
+// The recovery guidance is CITIZEN-FACING: internal rule codes (G-01…) must never
+// appear in it. The LLM is instructed not to use them, and this scrubber removes any
+// that slip through anyway — "(G-04)", "rule G-04:", standalone "G-04" — from both
+// the English and Arabic text before the plan is persisted.
+const stripRuleCodes = (s: string) =>
+  String(s ?? '')
+    .replace(/\(\s*(rule\s+)?G-\d+\s*\)/gi, '')
+    .replace(/\b(rule\s+)?G-\d+\b:?/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s+([.,;])/g, '$1')
+    .trim()
+
+const sanitizePlan = (plan: RecoveryPlan): RecoveryPlan => ({
+  ...plan,
+  steps: plan.steps.map((s) => ({ issue: stripRuleCodes(s.issue), action: stripRuleCodes(s.action) })),
+  summary: stripRuleCodes(plan.summary),
+  summaryAr: stripRuleCodes(plan.summaryAr),
+})
+
 const BLOCKER_LABEL: Record<string, string> = {
   'G-00': 'An active application already exists (duplicate)',
   'G-01': 'Missing income proof',
@@ -125,6 +144,7 @@ You have two tools you may call:
 
 Rules:
 - Be concrete and use EXACT numbers from the tools — never invent figures.
+- PLAIN LANGUAGE ONLY: you are writing for a citizen, not an employee. NEVER mention internal rule codes (G-00, G-01, G-04, …), "governance rules", "DBR", verdict words like "mismatch", or any system internals. Instead, describe the situation in everyday terms — e.g. say "so your arrears can be repaid within your remaining loan period" instead of "to meet the loan repayment period rule (G-04)".
 - One step per blocker. Be respectful and practical; this is a citizen, not an adversary.
 - If the only path is officer review (e.g. priority/hardship or a prior default), say so plainly and reassure them.
 - Output the final guidance in English (summary) and Arabic (summary_ar) plus a list of steps.
@@ -174,7 +194,7 @@ Call the tools as needed, then produce the recovery guidance.`
       result_summary: `${plan.steps.length} recovery step(s) for citizen · blockers: ${blockers.join(', ')}`,
     })
     console.log(`[RecoveryAgent] DONE case=${caseNumber} steps=${plan.steps.length} duration=${duration}ms`)
-    return { recoveryPlan: plan }
+    return { recoveryPlan: sanitizePlan(plan) }
   } catch (err) {
     console.error(`[RecoveryAgent] ERROR (non-fatal) case=${caseNumber}`, err)
     try {
@@ -185,7 +205,7 @@ Call the tools as needed, then produce the recovery guidance.`
         result_summary: `Recovery guidance (fallback) · blockers: ${blockers.join(', ')}`,
       })
     } catch { /* ignore */ }
-    return { recoveryPlan: plan }
+    return { recoveryPlan: sanitizePlan(plan) }
   }
 }
 

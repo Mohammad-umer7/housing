@@ -26,8 +26,7 @@ export type RiskForecast = {
 }
 
 // ── Document Agent ──────────────────────────────────────────────────────────��─
-// The verdict is the single source of truth in lib/document-forensics (adds
-// 'tampered' to the original QR-only set).
+// The verdict is the single source of truth in lib/document-forensics.
 export type DocAuthenticity = VerificationVerdict
 
 export type DocResult = {
@@ -37,7 +36,7 @@ export type DocResult = {
   salaryMismatch: boolean
   extractedSalary: number | null
   confidence: number
-  // Layered verification (DB field cross-check + structure + arithmetic + metadata + vision)
+  // Layered verification (doc-type gate + DB field cross-check + arithmetic + vision)
   authenticity: DocAuthenticity
   authorityName: string | null
   authoritySalary: number | null

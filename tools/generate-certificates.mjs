@@ -1,8 +1,8 @@
 // Generates demo salary-certificate PDFs that mirror the provided MOEI template.
 // SADDAD does NOT use a QR code: it validates the uploaded certificate's fields
-// (salary, Emirates ID, name, employer), its layout, its internal arithmetic, and
-// its PDF metadata against the issuing-authority record (DB-2, looked up by Emirates
-// ID). Also emits TAMPERED copies so judges can watch each forensic layer catch them.
+// (salary, Emirates ID, name, employer), its document type, and its internal
+// arithmetic against the issuing-authority record (looked up by Emirates ID).
+// Also emits TAMPERED copies so judges can watch each forensic layer catch them.
 //
 // Run: node tools/generate-certificates.mjs   (outputs to ./demo-certificates)
 //
@@ -97,17 +97,16 @@ async function main() {
   )
   written.push(`${salem.case}_TAMPERED-identity.pdf`)
 
-  // (c) Metadata-tampered: GENUINE values (salary + identity all match the authority),
-  //     but the PDF file was edited after issuance — a second %%EOF (incremental
-  //     update) is appended. The content layers PASS, yet the metadata-forensics layer
-  //     flags it -> verdict 'tampered'. Proves the forensic layers are independent.
-  const genuine1001 = await buildCertificate(salem)
-  const editedBytes = Buffer.concat([
-    genuine1001,
-    Buffer.from('\n% incremental update (re-saved after issuance)\n%%EOF\n', 'latin1'),
-  ])
-  await writeFile(path.join(OUT, `${salem.case}_TAMPERED-metadata.pdf`), editedBytes)
-  written.push(`${salem.case}_TAMPERED-metadata.pdf`)
+  // (c) Arithmetic-tampered: the gross STILL matches the authority record (so the
+  //     salary cross-check passes), but the internal breakdown was edited and no
+  //     longer reconciles (basic + allowances ≠ gross) -> verdict 'tampered'. Proves
+  //     the forensic layers are independent.
+  const tamperedArithmetic = { ...salem, basic: 12000, allow: 6000, gross: 15000 }
+  await writeFile(
+    path.join(OUT, `${salem.case}_TAMPERED-arithmetic.pdf`),
+    await buildCertificate(tamperedArithmetic)
+  )
+  written.push(`${salem.case}_TAMPERED-arithmetic.pdf`)
 
   console.log(`Generated ${written.length} certificates in ${OUT}:`)
   for (const w of written) console.log('  -', path.basename(w))

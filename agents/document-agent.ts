@@ -1,13 +1,34 @@
-// Document Agent (graph node) — verifies the salary certificate and flags a
-// salary mismatch the Critic can act on. Real OCR extraction happens upstream in
-// the API route (lib/pdf-extractor.ts); this node interprets the result. Runs in
+// Document Agent (graph node) — verifies the uploaded document (doc-type aware) and
+// flags fraud signals the Critic can act on. Real OCR extraction happens upstream in
+// the API route (lib/pdf-extractor.ts, three-tier Groq → Gemini Vision → regex); this
+// node runs the Gemini authenticity review and interprets the combined result. Runs in
 // parallel with the DB-Fetch node.
+//
+// ROUTING CONTRACT for an UPLOADED document:
+//   • invalid    → the file is NOT the requested document type (e.g. a tenancy
+//                  contract when a salary certificate was asked for)
+//                  ⇒ Request Documents (bounced to the citizen with the exact ask)
+//   • verified   → genuine and matching ⇒ proceed; the governance rules (G-00…G-05)
+//                  then decide Approve / Reject / Escalate
+//   • mismatch / suspicious / tampered / unverifiable → fraud or authenticity signal
+//                  (DB cross-check failed, vision flagged a fake, figures edited, or
+//                  no record to compare) ⇒ proceed so the Critic FORCE-ESCALATES it to
+//                  a HUMAN OFFICER — the citizen is NEVER auto-rejected for a document
+//                  authenticity problem, and both the citizen and the officer receive
+//                  the AI rationale explaining exactly what was flagged.
+// A missing upload always asks the citizen for the specific required document.
 
 import { updateAgentStep, type AgentName } from '@/lib/data-layer'
 import { getApplicant } from '@/lib/integrations/source-systems'
-import { buildVerificationReport, type PdfMetadata, type VisionAssessment } from '@/lib/document-forensics'
-import { checkStructure, checkArithmetic } from '@/lib/document-forensics'
-import { assessDocumentAuthenticity } from '@/lib/llm/gemini'
+import {
+  buildVerificationReport,
+  DOC_TYPE_PROFILES,
+  type StructureCheck,
+  type VisionAssessment,
+} from '@/lib/document-forensics'
+import { checkArithmetic } from '@/lib/document-forensics'
+import { assessDocumentAuthenticity, isGeminiConfigured } from '@/lib/llm/gemini'
+import { markFallback } from '@/lib/i18n'
 import { classifyRequestCircumstances, determineRequiredDocuments } from '@/governance/housing-arrears'
 import type { SaddadStateType, SaddadNodeUpdate } from './graph-state'
 import type { DocAuthenticity, VerificationReport } from './types'
@@ -30,8 +51,8 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
 
     // Authoritative record = the beneficiary's retrieved Programme data (MOEI /
     // Financial Services), looked up by Application ID. Income is validated against
-    // THIS record — with OR without an uploaded certificate. A certificate is
-    // optional; when one IS uploaded it gets the full forensic verification.
+    // THIS record — with OR without an uploaded certificate. When a document IS
+    // uploaded it gets the full doc-type-aware verification.
     const onRecord = await getApplicant(caseNumber)
     const onRecordSalary = Number(onRecord?.monthly_salary) || null
     const recordExists = !!onRecord && onRecordSalary !== null && onRecordSalary > 0
@@ -49,15 +70,19 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
       temporary_circumstance: circ.temporary_circumstance,
       hasIncomeRecord: recordExists,
     })
+    const expectedType = required.primaryType
+    const profile = DOC_TYPE_PROFILES[expectedType]
 
     const extractedFields = (formData.pdfExtractedFields ?? {}) as {
       employeeName?: string | null
       monthlySalary?: number | null
       employerName?: string | null
       confidence?: number
+      source?: string
     }
     const extractedSalary: number | null = extractedFields.monthlySalary ?? null
     const confidence = Number(extractedFields.confidence) || 0
+    const ocrWasFallback = extractedFields.source === 'regex_fallback'
 
     const authorityRecord = recordExists
       ? {
@@ -76,17 +101,20 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
 
     let verificationReport: VerificationReport
     if (documentUploaded) {
-      // Gemini VISION authenticity runs HERE in the background (not in the submission
-      // route), so it never blocks the citizen's submit. It catches a fabricated file
-      // that carries only the wanted values with no real letterhead/signature. Fully
-      // non-fatal: a null result (no key / 503 / timeout) just leaves the check N/A.
+      // Gemini VISION review runs HERE in the background (not in the submission route),
+      // so it never blocks the citizen's submit. It is TOLD the expected document type
+      // (so it knows whether the file is even the right document) and judges whether it
+      // looks genuinely issued — stamps/signatures deliberately ignored. Fully
+      // non-fatal: a null result (no key / 503 / timeout / circuit open) leaves the
+      // vision check N/A and the deterministic forensics decide alone (fallback).
       const pdfBase64 = typeof formData.pdfBase64 === 'string' ? formData.pdfBase64 : null
       const vision: VisionAssessment | null = pdfBase64
-        ? await assessDocumentAuthenticity(Buffer.from(pdfBase64, 'base64'))
+        ? await assessDocumentAuthenticity(Buffer.from(pdfBase64, 'base64'), expectedType)
         : null
 
-      // Full forensic verification of the uploaded document against the record.
+      // Full doc-type-aware verification of the uploaded document against the record.
       verificationReport = buildVerificationReport({
+        expectedType,
         record: authorityRecord,
         declaredSalary,
         extracted: {
@@ -95,13 +123,12 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
           employer: extractedFields.employerName ?? null,
           emiratesId: (formData.pdfExtractedEid as string | null) ?? null,
         },
-        structure: (formData.pdfStructure as ReturnType<typeof checkStructure> | null) ?? null,
+        structure: (formData.pdfStructure as StructureCheck | null) ?? null,
         arithmetic: (formData.pdfArithmetic as ReturnType<typeof checkArithmetic> | null) ?? null,
-        metadata: (formData.pdfMetadata as PdfMetadata | null) ?? null,
         vision,
       })
     } else {
-      // No certificate was uploaded — ask the citizen for exactly the document THIS
+      // No document was uploaded — ask the citizen for exactly the document THIS
       // situation needs (Request Documents, NOT a rejection).
       verificationReport = {
         verdict: 'unverifiable',
@@ -116,49 +143,49 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
         summary: `Additional documentation required — ${required.labels.join('; ')}.`,
         authorityName: onRecord ? (String(onRecord.full_name ?? '') || null) : null,
         authoritySalary: onRecordSalary,
+        expectedType,
       }
     }
 
     const verdict = verificationReport.verdict
 
-    // Routing contract for an UPLOADED certificate:
-    //   • invalid  → the file is not a salary certificate (wrong document)          ⇒ Request Documents
-    //   • mismatch → the certificate's details disagree with the beneficiary record ⇒ Request Documents
-    //   • verified → genuine and matching                                           ⇒ proceed
-    //   • suspicious / tampered / unverifiable → the DATA is real but the file is
-    //     flagged (fabricated-looking, edited, or no record to compare) ⇒ proceed so
-    //     the Critic escalates it to a HUMAN OFFICER (never bounced to the citizen).
-    // A missing upload always asks the citizen for the required document.
-    const needsResubmit = documentUploaded && (verdict === 'invalid' || verdict === 'mismatch')
+    // Only the WRONG DOCUMENT TYPE bounces back to the citizen (they simply uploaded
+    // the wrong file — give them the exact ask). Every authenticity/fraud signal
+    // (mismatch / suspicious / tampered / unverifiable) proceeds so the Critic
+    // escalates it to a human officer with the AI rationale.
+    const needsResubmit = documentUploaded && verdict === 'invalid'
     const complete = documentUploaded && !needsResubmit
 
     // Specific, citizen-facing reason when we bounce the file back for re-submission.
-    const resubmitReason =
-      verdict === 'invalid'
-        ? 'The uploaded file does not appear to be a salary certificate. Please upload a valid salary certificate (issued within the last 30 days).'
-        : verdict === 'mismatch'
-        ? `${verificationReport.summary} Please re-submit a correct, genuine salary certificate that matches your records.`
-        : ''
+    const resubmitReason = needsResubmit
+      ? `The uploaded file does not appear to be a ${profile.label}. Please upload: ${required.labels.join('; ')}.`
+      : ''
 
     const authenticity: DocAuthenticity = verdict
     const authorityName = verificationReport.authorityName
     const authoritySalary = verificationReport.authoritySalary
     // Citizen-facing reason: the specific resubmit message when bouncing the file back;
-    // otherwise the verification summary (used by the Critic when it escalates).
+    // otherwise the verification summary (used by the Critic when it escalates — this is
+    // the AI rationale both the officer and the citizen see).
     const authorityReason = needsResubmit ? resubmitReason : verificationReport.summary
     const salaryMismatch = authenticity === 'mismatch'
 
-    const documents = complete ? [required.primaryType] : []
-    // What to ask the citizen for: the specific resubmit reason for a wrong/mismatched
+    const documents = complete ? [expectedType] : []
+    // What to ask the citizen for: the specific resubmit reason for a wrong-type
     // upload, otherwise the situation's required documents (missing upload).
     const missing = complete ? [] : needsResubmit ? [resubmitReason] : required.labels
-    const icon = authenticity === 'verified' ? `✓ verified ${verificationReport.confidenceScore}%` : `⚠ ${authenticity} (${verificationReport.confidenceScore}%)`
+    const visionRan = isGeminiConfigured() && documentUploaded
+    const fallbackTag = documentUploaded && !visionRan ? ' · vision off (fallback)' : ''
+    const ocrTag = ocrWasFallback ? ' · OCR regex (fallback)' : ''
+    const icon = authenticity === 'verified'
+      ? `✓ verified ${verificationReport.confidenceScore}%`
+      : `⚠ ${authenticity} (${verificationReport.confidenceScore}%)`
     const stateLabel = !documentUploaded
-      ? `Documents required (${required.primaryType})`
+      ? `Documents required (${expectedType})`
       : needsResubmit
-      ? `Resubmit required — ${verdict === 'invalid' ? 'not a salary certificate' : 'details do not match record'}`
-      : 'Document uploaded'
-    const resultSummary = `${stateLabel} · ${icon}`
+      ? `Resubmit required — not a ${profile.label}`
+      : `Document uploaded (${expectedType})`
+    const resultSummary = `${stateLabel} · ${icon}${fallbackTag}${ocrTag}`
 
     const duration = Date.now() - start
     await updateAgentStep(caseNumber, agent, {
@@ -168,7 +195,7 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
       result_summary: resultSummary,
     })
 
-    console.log(`[DocumentAgent] DONE case=${caseNumber} complete=${complete} authenticity=${authenticity} duration=${duration}ms`)
+    console.log(`[DocumentAgent] DONE case=${caseNumber} complete=${complete} expected=${expectedType} authenticity=${authenticity} duration=${duration}ms`)
     return {
       docResult: {
         documents, complete, missing, salaryMismatch, extractedSalary, confidence,
@@ -183,9 +210,9 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
         status: 'failed',
         completed_at: new Date().toISOString(),
         duration_ms: Date.now() - start,
-        result_summary: `Non-fatal error: ${String(err)}`,
+        result_summary: markFallback(`Non-fatal error: ${String(err)}`),
       })
     } catch { /* ignore secondary failure */ }
-    return { docResult: { documents: [], complete: false, missing: ['salary_certificate'], salaryMismatch: false, extractedSalary: null, confidence: 0, authenticity: 'skipped', authorityName: null, authoritySalary: null, authorityReason: 'Document agent error — authenticity not checked.', verificationReport: null, requiredDocuments: [] } }
+    return { docResult: { documents: [], complete: false, missing: ['salary_certificate'], salaryMismatch: false, extractedSalary: null, confidence: 0, authenticity: 'skipped', authorityName: null, authoritySalary: null, authorityReason: markFallback('Document agent error — authenticity not checked.'), verificationReport: null, requiredDocuments: [] } }
   }
 }

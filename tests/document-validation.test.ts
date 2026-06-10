@@ -15,20 +15,22 @@ const record: AuthorityRecord = {
   issue_date: '2026-05-20',
   status: 'valid',
 }
-const looksLikeCert = { score: 1, found: 6, total: 6, looksLikeSalaryCertificate: true }
+const looksLikeCert = {
+  docType: 'salary_certificate' as const,
+  score: 1, found: 6, total: 6, looksLikeExpectedDoc: true,
+}
 
 function makeVision(over: Partial<VisionAssessment> & Pick<VisionAssessment, 'verdict'>): VisionAssessment {
   return {
     verdict: over.verdict,
     confidence: over.confidence ?? 80,
     reasons: over.reasons ?? [],
+    matchesExpectedType: over.matchesExpectedType ?? true,
     observed: {
       documentType: 'salary_certificate',
       salary: null,
       employeeName: null,
       employerName: null,
-      hasLetterhead: true,
-      hasSignatureOrStamp: true,
       issueDate: null,
       ...(over.observed ?? {}),
     },
@@ -37,23 +39,23 @@ function makeVision(over: Partial<VisionAssessment> & Pick<VisionAssessment, 've
 
 function report(vision: VisionAssessment | null, extractedSalary: number | null = 15000) {
   return buildVerificationReport({
+    expectedType: 'salary_certificate',
     record,
     declaredSalary: 15000,
     extracted: { salary: extractedSalary, name: record.employee_name, employer: record.employer_name, emiratesId: record.emirates_id },
     structure: looksLikeCert,
     arithmetic: null,
-    metadata: null,
     vision,
   })
 }
 
 describe('Vision-LLM authenticity layer', () => {
-  it('a clean, matching certificate with no vision signal verifies', () => {
+  it('a clean, matching certificate with no vision signal verifies (deterministic fallback)', () => {
     expect(report(null).verdict).toBe('verified')
   })
 
   it('vision "suspicious" overrides a clean field match → suspicious (the bare-values fake)', () => {
-    const r = report(makeVision({ verdict: 'suspicious', reasons: ['no letterhead, only a name and a salary figure'] }))
+    const r = report(makeVision({ verdict: 'suspicious', reasons: ['only a name and a salary figure, no expected content'] }))
     expect(r.verdict).toBe('suspicious')
     expect(r.checks.find((c) => c.id === 'vision_authenticity')?.status).toBe('fail')
   })
@@ -72,6 +74,11 @@ describe('Vision-LLM authenticity layer', () => {
     // extracted (OCR) salary null, but vision read AED 9,000 vs the AED 15,000 record.
     const r = report(makeVision({ verdict: 'authentic', observed: { salary: 9000 } as VisionAssessment['observed'] }), null)
     expect(r.verdict).toBe('mismatch')
+  })
+
+  it('vision says the file is NOT the requested document → invalid', () => {
+    const r = report(makeVision({ verdict: 'authentic', matchesExpectedType: false, observed: { documentType: 'tenancy contract' } as VisionAssessment['observed'] }))
+    expect(r.verdict).toBe('invalid')
   })
 
   it('vision unreadable is N/A, never penalised', () => {
@@ -119,7 +126,7 @@ describe('Gemini vision client graceful fallback', () => {
   it('is not configured and returns null without an API key', async () => {
     delete process.env.GEMINI_API_KEY
     expect(isGeminiConfigured()).toBe(false)
-    const res = await assessDocumentAuthenticity(new ArrayBuffer(8))
+    const res = await assessDocumentAuthenticity(new ArrayBuffer(8), 'salary_certificate')
     expect(res).toBeNull()
   })
 })

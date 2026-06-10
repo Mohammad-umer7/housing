@@ -19,12 +19,12 @@ const record: AuthorityRecord = {
 // are left 'na' (null) here so the verdict is driven purely by salary/record.
 function verdict(over: { record?: AuthorityRecord | null; extractedSalary?: number | null; declaredSalary?: number | null }) {
   return buildVerificationReport({
+    expectedType: 'salary_certificate',
     record: over.record === undefined ? record : over.record,
     declaredSalary: over.declaredSalary ?? null,
     extracted: { salary: over.extractedSalary ?? null, name: null, employer: null, emiratesId: null },
     structure: null,
     arithmetic: null,
-    metadata: null,
   }).verdict
 }
 

@@ -13,8 +13,9 @@ import {
 import { baseApplicationId } from '@/lib/integrations/source-systems'
 import { requireAuth, checkRateLimit } from '@/lib/middleware/auth'
 import { successResponse, errorResponse } from '@/lib/api-response'
-import { extractTextFromPDF, extractSalaryCertificateFields } from '@/lib/pdf-extractor'
-import { parsePdfMetadata, checkStructure, checkArithmetic, extractEmiratesId } from '@/lib/document-forensics'
+import { extractTextFromPDF, extractDocumentFields } from '@/lib/pdf-extractor'
+import { checkStructure, checkArithmetic, extractEmiratesId } from '@/lib/document-forensics'
+import { classifyRequestCircumstances, determineRequiredDocuments } from '@/governance/housing-arrears'
 
 const sanitize = (s: unknown) => String(s ?? '').replace(/<[^>]*>/g, '').trim()
 
@@ -79,10 +80,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(errorResponse('Invalid case number format', 400), { status: 400 })
     }
 
+    // Which document THIS case should have uploaded — read from the situation
+    // (reschedule reason + free-text), the same classification the Document Agent
+    // uses later. The expected type drives the doc-type-aware OCR field extraction
+    // here and the Gemini authenticity review in the background agent.
+    const expectedDocType = determineRequiredDocuments({
+      reschedule_reason: String(body.reschedule_reason || 'other'),
+      ...classifyRequestCircumstances(String(body.reschedule_reason || 'other'), String(body.remarks ?? '')),
+      hasIncomeRecord: true,
+    }).primaryType
+
     // Real PDF extraction + document forensics
     let extractedPdfText = ''
     let pdfExtractedFields = null
-    let pdfMetadata = null
     let pdfStructure = null
     let pdfArithmetic = null
     let pdfExtractedEid: string | null = null
@@ -94,15 +104,16 @@ export async function POST(req: NextRequest) {
       const pdfBuf = Buffer.from(arrayBuffer.slice(0))
 
       extractedPdfText = await extractTextFromPDF(arrayBuffer)
-      if (extractedPdfText.length > 50 && process.env.GROQ_API_KEY) {
-        pdfExtractedFields = await extractSalaryCertificateFields(extractedPdfText)
-      }
-      // Deterministic forensic signals (layout/structure, internal arithmetic, identity,
-      // PDF metadata for editing). The Gemini VISION authenticity check runs LATER in the
-      // background Document Agent — so we keep the raw PDF (base64) on the job payload and
-      // do NOT block the submission response on a vision LLM call here.
-      pdfMetadata = parsePdfMetadata(pdfBuf.toString('latin1'))
-      pdfStructure = checkStructure(extractedPdfText)
+      // Three-tier OCR (Groq → Gemini Vision → regex fallback), doc-type aware: the
+      // expected document type's profile tells the extractor exactly which fields to
+      // pull (salary cert vs bank statement vs non-work letter vs medical/support doc).
+      pdfExtractedFields = await extractDocumentFields(extractedPdfText, arrayBuffer, expectedDocType)
+      // Deterministic forensic signals (doc-type anchors, internal arithmetic, identity).
+      // The Gemini VISION authenticity check runs LATER in the background Document Agent —
+      // so we keep the raw PDF (base64) on the job payload and do NOT block the citizen's
+      // submission response on a vision LLM call here. A scanned PDF with no text layer
+      // gets structure=null (unknown) so it is never penalised for unreadable text.
+      pdfStructure = extractedPdfText.length >= 40 ? checkStructure(extractedPdfText, expectedDocType) : null
       pdfArithmetic = checkArithmetic(extractedPdfText)
       pdfExtractedEid = extractEmiratesId(extractedPdfText)
       if (pdfBuf.byteLength <= 4 * 1024 * 1024) pdfBase64 = pdfBuf.toString('base64')
@@ -135,15 +146,15 @@ export async function POST(req: NextRequest) {
       ...body,
       case_number: submissionCaseNumber,
       documentUploaded,
+      pdfExpectedDocType: expectedDocType,
       pdfExtractedFields,
-      pdfMetadata,
       pdfStructure,
       pdfArithmetic,
       pdfExtractedEid,
       pdfBase64,
       documents: documentUploaded
-        ? ['salary_certificate']
-        : (Array.isArray(body.documents) ? body.documents : ['salary_certificate']),
+        ? [expectedDocType]
+        : (Array.isArray(body.documents) ? body.documents : [expectedDocType]),
     }
 
     // TESTING ONLY — clean any stale rows for this exact case number (no-op for a fresh

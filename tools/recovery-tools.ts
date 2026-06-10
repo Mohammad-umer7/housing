@@ -84,20 +84,20 @@ export const REMEDIATION: Record<string, { en: string; ar: string }> = {
     ar: 'تمت إحالة حالتك إلى قائمة الرعاية ذات الأولوية. سيتواصل معك موظف مختص خلال 5 أيام عمل — لا حاجة لإجراء إضافي الآن.',
   },
   mismatch: {
-    en: 'The salary on your certificate does not match the issuing authority’s record. Re-submit a genuine certificate whose salary matches your declared income.',
-    ar: 'الراتب في شهادتك لا يطابق سجل الجهة المُصدِرة. أعد تقديم شهادة صحيحة يطابق راتبها دخلك المُعلن.',
+    en: 'The details on your document do not match the issuing authority’s record, so your case has been sent to a specialist officer for manual review. If you believe your document is correct, no action is needed — the officer will verify it and contact you. You may also obtain an up-to-date certificate from your employer in the meantime.',
+    ar: 'البيانات في مستندك لا تطابق سجل الجهة المُصدِرة، لذا تمت إحالة حالتك إلى موظف مختص للمراجعة اليدوية. إذا كنت تعتقد أن مستندك صحيح فلا حاجة لأي إجراء — سيتحقق الموظف ويتواصل معك. يمكنك أيضًا الحصول على شهادة محدّثة من جهة عملك في هذه الأثناء.',
   },
   suspicious: {
     en: 'Our AI verification flagged your uploaded document as possibly not genuine, so it has been sent to a specialist officer for manual review. If your document is authentic, no action is needed — the officer will confirm it. You may also upload a clearer original copy issued directly by your employer or the issuing authority.',
     ar: 'أشار نظام التحقق الذكي لدينا إلى أن المستند الذي رفعته قد لا يكون أصليًا، لذا تمت إحالته إلى موظف مختص للمراجعة اليدوية. إذا كان مستندك صحيحًا فلا حاجة لأي إجراء — سيؤكده الموظف. يمكنك أيضًا رفع نسخة أصلية أوضح صادرة مباشرةً من جهة عملك أو الجهة المُصدِرة.',
   },
   tampered: {
-    en: 'Your certificate appears to have been edited after it was issued (its PDF metadata or layout shows changes). Please obtain a fresh, unedited certificate directly from your employer or the issuing authority and upload the original file.',
-    ar: 'يبدو أن شهادتك قد تم تعديلها بعد إصدارها (تظهر بيانات ملف PDF أو تنسيقه تغييرات). يرجى الحصول على شهادة جديدة غير معدّلة مباشرةً من جهة العمل أو الجهة المُصدِرة ورفع الملف الأصلي.',
+    en: 'Your certificate appears to have been edited after it was issued (its salary figures do not reconcile). Please obtain a fresh, unedited certificate directly from your employer or the issuing authority and upload the original file.',
+    ar: 'يبدو أن شهادتك قد تم تعديلها بعد إصدارها (أرقام الراتب فيها غير متطابقة). يرجى الحصول على شهادة جديدة غير معدّلة مباشرةً من جهة العمل أو الجهة المُصدِرة ورفع الملف الأصلي.',
   },
   invalid: {
-    en: 'The file you uploaded is not a recognized salary certificate. Please upload your official salary certificate (a PDF issued by your employer or the issuing authority) — not a different document.',
-    ar: 'الملف الذي رفعته ليس شهادة راتب معتمدة. يرجى رفع شهادة الراتب الرسمية (ملف PDF صادر من جهة العمل أو الجهة المُصدِرة) وليس مستندًا آخر.',
+    en: 'The file you uploaded is not the document requested for your case. Please upload the exact document we asked for (a PDF issued by your employer or the issuing authority) — not a different document.',
+    ar: 'الملف الذي رفعته ليس المستند المطلوب لحالتك. يرجى رفع المستند المطلوب بالضبط (ملف PDF صادر من جهة العمل أو الجهة المُصدِرة) وليس مستندًا آخر.',
   },
   unverifiable: {
     en: 'The issuing authority has no salary record on file for you, so your certificate cannot be validated. Ask your employer to register/update your salary record with the authority, then re-submit.',
