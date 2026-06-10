@@ -5,6 +5,7 @@ import FeedbackWidget from './FeedbackWidget'
 import { Ico } from '@/components/saddad-ui'
 import { useA11y } from '@/components/AccessibilityProvider'
 import { CaseDecisionDetail, citizenStatus, TONE_PILL, type Decision } from './CaseDecisionDetail'
+import { SIGN_LANGUAGE_VIDEOS, useSignLanguageVideo } from '@/components/SignLanguageProvider'
 
 // Pipeline (11 agents, in execution order) — the Decision Trace renders these.
 const PIPELINE: { id: string; name: string; name_ar: string; icon: string; desc: string }[] = [
@@ -147,6 +148,8 @@ export default function AgentProcessing({ formData, onReset }: Props) {
   const totalSteps = data?.agentSteps.length || PIPELINE.length
   const progress = Math.min(100, Math.round((doneCount / totalSteps) * 100))
   const fullName = formData.full_name || ''
+
+  useSignLanguageVideo((isComplete || isFailed) ? SIGN_LANGUAGE_VIDEOS.verdict : SIGN_LANGUAGE_VIDEOS.caseSubmitted)
 
   // Citizen timeline (4 milestones) derived from real progress.
   function citizenTimeline() {

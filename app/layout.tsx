@@ -4,6 +4,7 @@ import "./globals.css";
 import { TTSProvider } from "@/lib/tts";
 import { AccessibilityProvider } from "@/components/AccessibilityProvider";
 import AssistantWidget from "@/components/AssistantWidget";
+import { SignLanguageProvider, SignLanguageWidget } from "@/components/SignLanguageProvider";
 
 // The MOEI design system's two typefaces, self-hosted via next/font and exposed as the
 // CSS variables (--font-jakarta / --font-plex-ar) that globals.css maps --font / --font-ar to.
@@ -35,10 +36,13 @@ export default function RootLayout({
       <body>
         <TTSProvider>
           <AccessibilityProvider>
-            <div id="a11y-root">
-              {children}
-              <AssistantWidget />
-            </div>
+            <SignLanguageProvider>
+              <div id="a11y-root">
+                {children}
+                <SignLanguageWidget />
+                <AssistantWidget />
+              </div>
+            </SignLanguageProvider>
           </AccessibilityProvider>
         </TTSProvider>
       </body>

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Ico } from '@/components/saddad-ui'
 import { useA11y } from '@/components/AccessibilityProvider'
 import { CaseDecisionDetail, citizenStatus, TONE_PILL, type Decision } from '@/components/CaseDecisionDetail'
+import { SIGN_LANGUAGE_VIDEOS, useSignLanguageVideo } from '@/components/SignLanguageProvider'
 
 type CaseCard = {
   case_number: string
@@ -61,6 +62,8 @@ export default function CitizenHome({ appId, onNewApplication, onResubmit, onVie
   const [selected, setSelected] = useState<string | null>(null)
   const [detail, setDetail] = useState<{ decision: Decision | null; status: string; endDateStr: string | null } | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+
+  useSignLanguageVideo(selected ? SIGN_LANGUAGE_VIDEOS.verdict : SIGN_LANGUAGE_VIDEOS.home)
 
   const load = useCallback(async () => {
     try {

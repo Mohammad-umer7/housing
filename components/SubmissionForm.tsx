@@ -4,6 +4,7 @@ import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { OFFICIAL_MOEI_RULES } from '@/governance/housing-arrears'
 import { Ico, DataHead, Field } from '@/components/saddad-ui'
 import { useA11y } from '@/components/AccessibilityProvider'
+import { SIGN_LANGUAGE_VIDEOS, useSignLanguageVideo } from '@/components/SignLanguageProvider'
 
 // MOEI arrears rescheduling has NO salary floor — a genuinely low salary is referred to
 // an officer by the debt-burden rule (G-03), it is not blocked. We only hard-block
@@ -97,6 +98,18 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
   const [savedFormData, setSavedFormData] = useState<Record<string, string> | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [stepError, setStepError] = useState<string | null>(null)
+
+  const signLanguageVideo =
+    phase === 'confirmed'
+      ? SIGN_LANGUAGE_VIDEOS.caseSubmitted
+      : step === 3
+        ? SIGN_LANGUAGE_VIDEOS.document
+        : step === 4
+          ? SIGN_LANGUAGE_VIDEOS.reason
+          : step === 5
+            ? null
+            : SIGN_LANGUAGE_VIDEOS.financial
+  useSignLanguageVideo(signLanguageVideo)
 
   const lookupCase = useCallback(async (caseNumber: string, targetStep = 2) => {
     if (!caseNumber.trim()) return

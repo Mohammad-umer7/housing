@@ -1651,6 +1651,160 @@ html.high-contrast *:focus-visible {
 #a11y-root.a11y-lang-ar { font-family: var(--font-ar); }
 
 /* ============================================================
+   SIGN LANGUAGE VIDEO WIDGET (floating, bottom-left)
+   ============================================================ */
+.sign-fab {
+  position: fixed;
+  bottom: 24px;
+  left: 24px;
+  z-index: 90;
+  width: 58px;
+  height: 58px;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  background: var(--ink-navy);
+  color: #ffffff;
+  display: grid;
+  place-items: center;
+  box-shadow: var(--shadow-lg);
+  transition: background .16s, transform .16s;
+}
+.sign-fab:hover {
+  background: var(--gold-dark);
+  transform: translateY(-2px);
+}
+
+.sign-panel {
+  position: fixed;
+  bottom: 24px;
+  left: 24px;
+  z-index: 96;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.sign-panel-hd {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 13px;
+  background: var(--cream-soft);
+  border-bottom: 1px solid var(--gold-line);
+}
+
+.sign-panel-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  flex: none;
+  background: var(--gold-tint);
+  border: 1px solid var(--gold-line);
+  color: var(--gold-dark);
+  display: grid;
+  place-items: center;
+}
+
+.sign-panel-title-wrap {
+  min-width: 0;
+  flex: 1;
+}
+
+.sign-panel-title {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.sign-panel-sub {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sign-icon-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--r-sm);
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex: none;
+}
+.sign-icon-btn:hover {
+  background: var(--panel-alt);
+  color: var(--ink);
+}
+
+.sign-video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000000;
+  object-fit: contain;
+}
+
+.sign-controls {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+}
+
+.sign-controls button {
+  flex: 1;
+  min-width: 0;
+  height: 38px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line-strong);
+  background: var(--bg);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+.sign-controls button:hover {
+  border-color: var(--gold-line);
+  color: var(--gold-dark);
+  background: var(--gold-tint);
+}
+
+@media (max-width: 600px) {
+  .sign-fab {
+    bottom: 16px;
+    left: 16px;
+    width: 54px;
+    height: 54px;
+  }
+
+  .sign-panel {
+    bottom: 16px;
+    left: 16px;
+    width: min(360px, calc(100vw - 32px));
+    max-width: calc(100vw - 32px);
+  }
+}
+
+/* ============================================================
    SADDAD AI ASSISTANT WIDGET (floating, role-aware)
    ============================================================ */
 .assistant-fab {
