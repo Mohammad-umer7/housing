@@ -97,6 +97,14 @@ describe('Smart required documents (two-document model)', () => {
     expect(r.primary.label).toMatch(/non-work|termination/i)
   })
 
+  it('job loss / unemployment + uploadedDocType salary_certificate → salary cert is primary and non-work letter is supporting doc', () => {
+    const r = determineRequiredDocuments({ unemployment: true, hasIncomeRecord: true, uploadedDocType: 'salary_certificate' })
+    expect(r.primary.type).toBe('salary_certificate')
+    expect(r.supporting?.type).toBe('non_work_letter')
+    expect(r.requiresUpload).toBe(true)
+    expect(r.supporting?.label).toMatch(/non-work|termination/i)
+  })
+
   it('business failure → salary cert (primary) + bank/income statement (supporting)', () => {
     const r = determineRequiredDocuments({ reschedule_reason: 'business_failure', hasIncomeRecord: true })
     expect(r.primary.type).toBe('salary_certificate')

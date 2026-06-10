@@ -53,6 +53,7 @@ export async function escalationNode(state: SaddadStateType): Promise<SaddadNode
       pendingSupportingDoc: docResult?.pendingSupportingDoc ?? null,
       salaryCertValidated: docResult?.salaryCertValidated ?? false,
       validatedSalary: docResult?.validatedSalary ?? null,
+      validatedSalaryCertDate: docResult?.validatedSalaryCertDate ?? null,
     }
 
     await executeDatabaseTool('update_case', {

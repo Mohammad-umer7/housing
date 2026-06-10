@@ -300,12 +300,21 @@ export function determineRequiredDocuments(input: {
   income_changed?: boolean
   temporary_circumstance?: boolean
   hasIncomeRecord?: boolean
+  uploadedDocType?: string
 }): RequiredDocuments {
   const reason = String(input.reschedule_reason || 'other')
 
-  // Job loss / unemployment: the non-work letter REPLACES the salary certificate (an
-  // unemployed beneficiary has no salary to certify). Single mandatory document.
+  // Job loss / unemployment:
+  // - If the user uploaded a salary certificate (or a prior one was validated),
+  //   the primary document is salary_certificate, and the non-work letter is the supporting document.
+  // - Otherwise, the non-work/termination letter replaces the salary certificate directly.
   if (input.unemployment || reason === 'job_loss') {
+    if (input.uploadedDocType === 'salary_certificate') {
+      return withCompat(
+        { type: 'salary_certificate', label: DOC_LABELS.salary_certificate },
+        { type: 'non_work_letter', label: DOC_LABELS.non_work_letter }
+      )
+    }
     return withCompat({ type: 'non_work_letter', label: DOC_LABELS.non_work_letter }, null)
   }
 

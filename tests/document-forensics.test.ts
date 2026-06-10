@@ -115,6 +115,14 @@ describe('buildVerificationReport', () => {
     const r = buildVerificationReport(inputs({ extracted: { salary: 15000, name: 'Salem Saif Al Ameri', employer: 'ADNOC', emiratesId: '784-0000-0000000-0' } }))
     expect(r.verdict).toBe('mismatch')
   })
+  test('Name mismatch vs authority → mismatch', () => {
+    const r = buildVerificationReport(inputs({ extracted: { salary: 15000, name: 'Different Name', employer: 'ADNOC', emiratesId: '784-1988-2341567-3' } }))
+    expect(r.verdict).toBe('mismatch')
+  })
+  test('Employer mismatch vs authority → mismatch', () => {
+    const r = buildVerificationReport(inputs({ extracted: { salary: 15000, name: 'Salem Saif Al Ameri', employer: 'Different Company', emiratesId: '784-1988-2341567-3' } }))
+    expect(r.verdict).toBe('mismatch')
+  })
   test('figures that do not reconcile → tampered', () => {
     const r = buildVerificationReport(inputs({
       arithmetic: checkArithmetic('Basic Salary: AED 5,000 Allowances: AED 6,000 Gross Monthly Salary: AED 15,000'),
@@ -203,5 +211,35 @@ describe('buildVerificationReport', () => {
       vision: vision({ verdict: 'suspicious', reasons: ['placeholder text only'] }),
     })
     expect(r.verdict).toBe('suspicious')
+  })
+
+  test('non-work letter date older than validated salary cert date → mismatch', () => {
+    const r = buildVerificationReport({
+      expectedType: 'non_work_letter',
+      record: null,
+      declaredSalary: null,
+      extracted: { salary: null, name: 'Salem Saif Al Ameri', employer: null, emiratesId: '784-1988-2341567-3', issueDate: '15/05/2025' },
+      structure: checkStructure(NON_WORK_TEXT, 'non_work_letter'),
+      arithmetic: null,
+      vision: vision({ observed: { documentType: 'termination letter', salary: null, employeeName: 'Salem Saif Al Ameri', employerName: null, issueDate: '15/05/2025' } }),
+      validatedSalaryCertDate: '09/06/2026',
+    })
+    expect(r.verdict).toBe('mismatch')
+    expect(r.checks.find((c) => c.id === 'date_chronology')?.status).toBe('fail')
+  })
+
+  test('non-work letter date newer than validated salary cert date → verified', () => {
+    const r = buildVerificationReport({
+      expectedType: 'non_work_letter',
+      record: null,
+      declaredSalary: null,
+      extracted: { salary: null, name: 'Salem Saif Al Ameri', employer: null, emiratesId: '784-1988-2341567-3', issueDate: '09/06/2026' },
+      structure: checkStructure(NON_WORK_TEXT, 'non_work_letter'),
+      arithmetic: null,
+      vision: vision({ observed: { documentType: 'termination letter', salary: null, employeeName: 'Salem Saif Al Ameri', employerName: null, issueDate: '09/06/2026' } }),
+      validatedSalaryCertDate: '15/05/2025',
+    })
+    expect(r.verdict).toBe('verified')
+    expect(r.checks.find((c) => c.id === 'date_chronology')?.status).toBe('pass')
   })
 })

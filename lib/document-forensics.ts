@@ -290,6 +290,7 @@ export type ForensicInputs = {
     emiratesId: string | null
     iban?: string | null
     account?: string | null
+    issueDate?: string | null
   }
   // null ⇒ the signal was not available (e.g. scanned PDF with no text layer) → the
   // check is "na", never penalised.
@@ -298,10 +299,11 @@ export type ForensicInputs = {
   // Vision-LLM judgment on the actual PDF (null/omitted = not run → fallback to the
   // deterministic layers).
   vision?: VisionAssessment | null
+  validatedSalaryCertDate?: string | null
 }
 
 export function buildVerificationReport(input: ForensicInputs): VerificationReport {
-  const { expectedType, record, declaredSalary, extracted, structure, arithmetic, vision } = input
+  const { expectedType, record, declaredSalary, extracted, structure, arithmetic, vision, validatedSalaryCertDate } = input
   const profile = DOC_TYPE_PROFILES[expectedType]
   const checks: VerificationCheck[] = []
   const visionSuspicious = !!vision && (vision.verdict === 'suspicious' || vision.verdict === 'likely_fake')
@@ -424,7 +426,7 @@ export function buildVerificationReport(input: ForensicInputs): VerificationRepo
   checks.push({
     id: 'name_match',
     label: 'Name matches the authority record',
-    status: nameMatch === null ? 'na' : nameMatch ? 'pass' : 'warn',
+    status: nameMatch === null ? 'na' : nameMatch ? 'pass' : 'fail',
     detail: nameMatch === null
       ? 'Name not available to cross-check.'
       : nameMatch
@@ -440,7 +442,7 @@ export function buildVerificationReport(input: ForensicInputs): VerificationRepo
   checks.push({
     id: 'employer_match',
     label: 'Employer matches the authority record',
-    status: employerMatch === null ? 'na' : employerMatch ? 'pass' : 'warn',
+    status: employerMatch === null ? 'na' : employerMatch ? 'pass' : 'fail',
     detail: !profile.salaryBearing
       ? `Not applicable for a ${profile.label}.`
       : employerMatch === null
@@ -517,6 +519,36 @@ export function buildVerificationReport(input: ForensicInputs): VerificationRepo
     weight: 25,
   })
 
+  // 7: date chronology check for termination letters (supporting docs in job loss)
+  const nonWorkLetterDateStr = expectedType === 'non_work_letter' ? (extracted.issueDate ?? vision?.observed?.issueDate ?? null) : null
+  const validatedSalaryCertDateStr = validatedSalaryCertDate ?? null
+  let dateChronologyPass = true
+  if (nonWorkLetterDateStr && validatedSalaryCertDateStr) {
+    const salaryCertDate = parseDate(validatedSalaryCertDateStr)
+    const nonWorkLetterDate = parseDate(nonWorkLetterDateStr)
+    if (salaryCertDate && nonWorkLetterDate && nonWorkLetterDate < salaryCertDate) {
+      dateChronologyPass = false
+    }
+  }
+
+  checks.push({
+    id: 'date_chronology',
+    label: 'Termination letter date matches salary certificate chronology',
+    status: expectedType !== 'non_work_letter' || !validatedSalaryCertDateStr || !nonWorkLetterDateStr
+      ? 'na'
+      : dateChronologyPass
+      ? 'pass'
+      : 'fail',
+    detail: expectedType !== 'non_work_letter'
+      ? `Not applicable for a ${profile.label}.`
+      : !validatedSalaryCertDateStr || !nonWorkLetterDateStr
+      ? 'No prior salary certificate or current termination letter date to compare.'
+      : dateChronologyPass
+      ? `Termination letter date (${nonWorkLetterDateStr}) matches salary certificate chronology.`
+      : `Termination letter date (${nonWorkLetterDateStr}) is older than the salary certificate date (${validatedSalaryCertDateStr}).`,
+    weight: 15,
+  })
+
   // ── Confidence score: weighted pass-ratio over the SCORED, applicable checks
   // (the anchor is excluded; N/A checks are excluded). It answers "how confident are
   // we this is the genuine, matching document we asked for" — so a wrong-type file
@@ -540,7 +572,7 @@ export function buildVerificationReport(input: ForensicInputs): VerificationRepo
   let verdict: VerificationVerdict
   if (visionSuspicious) verdict = 'suspicious'
   else if (wrongType) verdict = 'invalid'
-  else if (salaryMismatch || eidMatch === false || accountMismatch) verdict = 'mismatch'
+  else if (salaryMismatch || eidMatch === false || nameMatch === false || employerMatch === false || accountMismatch || !dateChronologyPass) verdict = 'mismatch'
   else if (profile.salaryBearing && !recordValid) verdict = 'unverifiable'
   else if (arithmeticFail) verdict = 'tampered'
   else verdict = 'verified'
@@ -570,4 +602,31 @@ export function buildVerificationReport(input: ForensicInputs): VerificationRepo
     authoritySalary,
     expectedType,
   }
+}
+
+function parseDate(dateStr: string | null | undefined): Date | null {
+  if (!dateStr) return null
+  const clean = dateStr.trim()
+
+  // Match DD/MM/YYYY or DD-MM-YYYY
+  let match = clean.match(/^(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{4})$/)
+  if (match) {
+    const day = parseInt(match[1], 10)
+    const month = parseInt(match[2], 10) - 1
+    const year = parseInt(match[3], 10)
+    return new Date(year, month, day)
+  }
+
+  // Match YYYY-MM-DD or YYYY/MM/DD
+  match = clean.match(/^(\d{4})[\/\.-](\d{1,2})[\/\.-](\d{1,2})$/)
+  if (match) {
+    const year = parseInt(match[1], 10)
+    const month = parseInt(match[2], 10) - 1
+    const day = parseInt(match[3], 10)
+    return new Date(year, month, day)
+  }
+
+  // Fallback parser
+  const parsed = new Date(clean)
+  return isNaN(parsed.getTime()) ? null : parsed
 }

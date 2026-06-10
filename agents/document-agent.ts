@@ -63,12 +63,21 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
     const reason = String(formData.reschedule_reason || onRecord?.reschedule_reason || 'other')
     const freeText = `${formData.remarks ?? onRecord?.remarks ?? ''} ${onRecord?.justifications ?? ''}`
     const circ = classifyRequestCircumstances(reason, freeText)
+
+    const uploadedDocType =
+      formData.pdfExpectedDocType === 'salary_certificate' || formData.salaryCertAlreadyValidated
+        ? 'salary_certificate'
+        : formData.pdfExpectedDocType === 'non_work_letter'
+        ? 'non_work_letter'
+        : undefined
+
     const required = determineRequiredDocuments({
       reschedule_reason: reason,
       unemployment: circ.unemployment,
       income_changed: Boolean(onRecord?.income_changed) || circ.income_changed,
       temporary_circumstance: circ.temporary_circumstance,
       hasIncomeRecord: recordExists,
+      uploadedDocType,
     })
     // Two-document round-trip: if the salary cert was already validated in a prior
     // submission, THIS submission is the supporting-doc stage; otherwise it's the primary
@@ -110,6 +119,8 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
       : null
 
     let verificationReport: VerificationReport
+    let supportingReport: VerificationReport | null = null
+
     if (documentUploaded) {
       // Gemini VISION review runs HERE in the background (not in the submission route),
       // so it never blocks the citizen's submit. It is TOLD the expected document type
@@ -134,11 +145,52 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
           emiratesId: (formData.pdfExtractedEid as string | null) ?? null,
           iban: (formData.pdfExtractedIban as string | null) ?? null,
           account: (formData.pdfExtractedAccount as string | null) ?? null,
+          issueDate: extractedFields.issueDate ?? null,
         },
         structure: (formData.pdfStructure as StructureCheck | null) ?? null,
         arithmetic: (formData.pdfArithmetic as ReturnType<typeof checkArithmetic> | null) ?? null,
         vision,
+        validatedSalaryCertDate: formData.validatedSalaryCertDate ? String(formData.validatedSalaryCertDate) : null,
       })
+
+      // If primary is valid/accepted and we have a supporting document uploaded in this same primary stage:
+      if (stage === 'primary' && verificationReport.verdict !== 'invalid' && Boolean(formData.supportingDocUploaded) && required.supporting) {
+        const expectedSupportingType = required.supporting.type
+        const pdfSupportingBase64 = typeof formData.pdfSupportingBase64 === 'string' ? formData.pdfSupportingBase64 : null
+        const suppVision: VisionAssessment | null = pdfSupportingBase64
+          ? await assessDocumentAuthenticity(Buffer.from(pdfSupportingBase64, 'base64'), expectedSupportingType)
+          : null
+
+        const suppExtractedFields = (formData.pdfSupportingExtractedFields ?? {}) as {
+          employeeName?: string | null
+          monthlySalary?: number | null
+          employerName?: string | null
+          confidence?: number
+          source?: string
+          issueDate?: string | null
+        }
+
+        const primaryValidatedDate = extractedFields.issueDate ?? vision?.observed?.issueDate ?? null
+
+        supportingReport = buildVerificationReport({
+          expectedType: expectedSupportingType,
+          record: authorityRecord,
+          declaredSalary,
+          extracted: {
+            salary: suppExtractedFields.monthlySalary ?? null,
+            name: suppExtractedFields.employeeName ?? null,
+            employer: suppExtractedFields.employerName ?? null,
+            emiratesId: (formData.pdfSupportingExtractedEid as string | null) ?? null,
+            iban: (formData.pdfSupportingExtractedIban as string | null) ?? null,
+            account: (formData.pdfSupportingExtractedAccount as string | null) ?? null,
+            issueDate: suppExtractedFields.issueDate ?? null,
+          },
+          structure: (formData.pdfSupportingStructure as StructureCheck | null) ?? null,
+          arithmetic: (formData.pdfSupportingArithmetic as ReturnType<typeof checkArithmetic> | null) ?? null,
+          vision: suppVision,
+          validatedSalaryCertDate: primaryValidatedDate,
+        })
+      }
     } else {
       // No document was uploaded — ask the citizen for exactly the document THIS
       // situation needs (Request Documents, NOT a rejection).
@@ -159,12 +211,59 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
       }
     }
 
+    const primaryVerdict = verificationReport.verdict
+
+    if (supportingReport) {
+      // Merge the two reports
+      const mergedChecks = [
+        ...verificationReport.checks,
+        ...supportingReport.checks.map(c => ({
+          ...c,
+          id: `supp_${c.id}`,
+          label: `${c.label} (Supporting Doc)`,
+          detail: `${c.detail} (Supporting Doc)`,
+        }))
+      ]
+
+      // Recalculate confidenceScore
+      const scored = mergedChecks.filter((c) => c.scored !== false && c.status !== 'na')
+      const totalWeight = scored.reduce((s, c) => s + c.weight, 0) || 1
+      const earned = scored.reduce(
+        (s, c) => s + (c.status === 'pass' ? c.weight : c.status === 'warn' ? c.weight * 0.5 : 0),
+        0
+      )
+      const combinedConfidenceScore = Math.round((earned / totalWeight) * 100)
+
+      // Precedence: suspicious > invalid > mismatch > unverifiable > tampered > verified
+      let combinedVerdict: typeof verificationReport.verdict = 'verified'
+      const verdicts = [verificationReport.verdict, supportingReport.verdict]
+      if (verdicts.includes('suspicious')) combinedVerdict = 'suspicious'
+      else if (verdicts.includes('invalid')) combinedVerdict = 'invalid'
+      else if (verdicts.includes('mismatch')) combinedVerdict = 'mismatch'
+      else if (verdicts.includes('unverifiable')) combinedVerdict = 'unverifiable'
+      else if (verdicts.includes('tampered')) combinedVerdict = 'tampered'
+
+      const combinedSummary = `${verificationReport.summary} Supporting Doc: ${supportingReport.summary}`
+
+      verificationReport = {
+        verdict: combinedVerdict,
+        confidenceScore: combinedConfidenceScore,
+        checks: mergedChecks,
+        summary: combinedSummary,
+        authorityName: verificationReport.authorityName,
+        authoritySalary: verificationReport.authoritySalary,
+        expectedType: verificationReport.expectedType,
+      }
+    }
+
     const verdict = verificationReport.verdict
 
     // Only the WRONG DOCUMENT TYPE bounces back to the citizen (they simply uploaded
     // the wrong file — give them the exact ask). Every authenticity/fraud signal
-    // (mismatch / suspicious / tampered) proceeds so the Critic escalates it to a human
-    // officer with the AI rationale — never an auto-rejection on authenticity.
+    // (mismatch / suspicious / tampered) proceeds so the Critic force-escalates it to
+    // a HUMAN OFFICER — the citizen is NEVER auto-rejected for a document
+    // authenticity problem, and both the citizen and the officer receive
+    // the AI rationale explaining exactly what was flagged.
     const wrongType = documentUploaded && verdict === 'invalid'
     const fraudSignal = documentUploaded && ['mismatch', 'suspicious', 'tampered'].includes(verdict)
     const accepted = documentUploaded && !wrongType // present & right type (fraud still proceeds)
@@ -185,31 +284,53 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
       complete = accepted
       owedDoc = accepted ? null : required.supporting
       if (!accepted) pendingSupportingDoc = required.supporting
-    } else if (!accepted) {
-      // Primary missing or wrong type → ask for the primary document.
-      complete = false
-      owedDoc = required.primary
-    } else if (fraudSignal) {
-      // Authenticity concern on the primary → proceed now so the Critic force-escalates a
-      // human review (do not defer behind a supporting-doc round-trip).
-      complete = true
-      owedDoc = null
-    } else if (required.supporting) {
-      // Clean primary, but a reason-specific supporting doc is still owed → round-trip.
-      // Carry the validated salary cert forward so the resubmission only needs that doc.
-      complete = false
-      owedDoc = required.supporting
-      pendingSupportingDoc = required.supporting
-      salaryCertValidated = true
-      validatedSalary = extractedSalary ?? onRecordSalary
     } else {
-      complete = true
-      owedDoc = null
+      // stage === 'primary'
+      const primaryAccepted = documentUploaded && primaryVerdict !== 'invalid'
+      const primaryFraud = primaryAccepted && ['mismatch', 'suspicious', 'tampered'].includes(primaryVerdict)
+
+      if (!primaryAccepted) {
+        complete = false
+        owedDoc = required.primary
+      } else if (primaryFraud) {
+        complete = true
+        owedDoc = null
+      } else if (required.supporting) {
+        if (supportingReport) {
+          const suppAccepted = supportingReport.verdict !== 'invalid'
+          const suppFraud = suppAccepted && ['mismatch', 'suspicious', 'tampered'].includes(supportingReport.verdict)
+
+          if (!suppAccepted) {
+            complete = false
+            owedDoc = required.supporting
+            pendingSupportingDoc = required.supporting
+            salaryCertValidated = true
+            validatedSalary = extractedSalary ?? onRecordSalary
+          } else if (suppFraud) {
+            complete = true
+            owedDoc = null
+          } else {
+            complete = true
+            owedDoc = null
+          }
+        } else {
+          complete = false
+          owedDoc = required.supporting
+          pendingSupportingDoc = required.supporting
+          salaryCertValidated = true
+          validatedSalary = extractedSalary ?? onRecordSalary
+        }
+      } else {
+        complete = true
+        owedDoc = null
+      }
     }
 
     // Specific, citizen-facing reason when we bounce the file back for re-submission.
     const resubmitReason = wrongType
-      ? `The uploaded file does not appear to be a ${profile.label}. Please upload: ${owedDoc?.label ?? required.primary.label}.`
+      ? (supportingReport && supportingReport.verdict === 'invalid'
+        ? `The uploaded supporting document does not appear to be a ${DOC_TYPE_PROFILES[required.supporting!.type].label}. Please upload: ${owedDoc?.label ?? required.supporting!.label}.`
+        : `The uploaded file does not appear to be a ${profile.label}. Please upload: ${owedDoc?.label ?? required.primary.label}.`)
       : ''
 
     const authenticity: DocAuthenticity = verdict
@@ -237,7 +358,7 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
     const stateLabel = !documentUploaded
       ? `${stage === 'supporting' ? 'Supporting document' : 'Documents'} required (${expectedType})`
       : wrongType
-      ? `Resubmit required — not a ${profile.label}`
+      ? (supportingReport && supportingReport.verdict === 'invalid' ? `Resubmit required — not a ${DOC_TYPE_PROFILES[required.supporting!.type].label}` : `Resubmit required — not a ${profile.label}`)
       : stage === 'primary' && !complete
       ? `Salary cert verified — supporting document required (${required.supporting?.type ?? ''})`
       : `Document verified (${expectedType})`
@@ -252,12 +373,18 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
     })
 
     console.log(`[DocumentAgent] DONE case=${caseNumber} complete=${complete} expected=${expectedType} authenticity=${authenticity} duration=${duration}ms`)
+    const validatedSalaryCertDate =
+      stage === 'primary' && accepted
+        ? (extractedFields.issueDate ?? vision?.observed?.issueDate ?? null)
+        : (formData.validatedSalaryCertDate ?? null)
+
     return {
       docResult: {
         documents, complete, missing, salaryMismatch, extractedSalary, confidence,
         authenticity, authorityName, authoritySalary, authorityReason, verificationReport,
         requiredDocuments: required.labels,
         stage, pendingSupportingDoc, salaryCertValidated, validatedSalary,
+        validatedSalaryCertDate,
       },
     }
   } catch (err) {
@@ -272,4 +399,31 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
     } catch { /* ignore secondary failure */ }
     return { docResult: { documents: [], complete: false, missing: ['salary_certificate'], salaryMismatch: false, extractedSalary: null, confidence: 0, authenticity: 'skipped', authorityName: null, authoritySalary: null, authorityReason: markFallback('Document agent error — authenticity not checked.'), verificationReport: null, requiredDocuments: [] } }
   }
+}
+
+function parseDate(dateStr: string | null | undefined): Date | null {
+  if (!dateStr) return null
+  const clean = dateStr.trim()
+
+  // Match DD/MM/YYYY or DD-MM-YYYY
+  let match = clean.match(/^(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{4})$/)
+  if (match) {
+    const day = parseInt(match[1], 10)
+    const month = parseInt(match[2], 10) - 1
+    const year = parseInt(match[3], 10)
+    return new Date(year, month, day)
+  }
+
+  // Match YYYY-MM-DD or YYYY/MM/DD
+  match = clean.match(/^(\d{4})[\/\.-](\d{1,2})[\/\.-](\d{1,2})$/)
+  if (match) {
+    const year = parseInt(match[1], 10)
+    const month = parseInt(match[2], 10) - 1
+    const day = parseInt(match[3], 10)
+    return new Date(year, month, day)
+  }
+
+  // Fallback parser
+  const parsed = new Date(clean)
+  return isNaN(parsed.getTime()) ? null : parsed
 }

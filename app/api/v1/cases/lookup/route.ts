@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/middleware/auth'
 import { successResponse, errorResponse } from '@/lib/api-response'
 import { getApplicant } from '@/lib/integrations/source-systems'
@@ -39,18 +39,29 @@ export async function GET(req: NextRequest) {
     const uaePass = await lookupUaePassProfile(caseNumber)
     const socialLabel = uaePass ? SOCIAL_STATUS_LABELS[uaePass.social_status] : null
 
-    const priorCase = await getCaseByCaseNumber(caseNumber)
+    // Retrieve prior cases first so we can check if a salary certificate was already validated
+    const emiratesIdForCases = String(uaePass?.emirates_id ?? applicant.emirates_id ?? '')
+    let hasPriorValidatedSalaryCert = false
+    let mostRecentCaseStudy: Record<string, unknown> | null = null
+    let mostRecentCase: any = null
+    if (emiratesIdForCases) {
+      const beneficiaryCases = await getCasesByEmiratesId(emiratesIdForCases)
+      mostRecentCase = beneficiaryCases
+        .slice()
+        .sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')))[0]
+      if (mostRecentCase?.case_study && typeof mostRecentCase.case_study === 'object') {
+        mostRecentCaseStudy = mostRecentCase.case_study as Record<string, unknown>
+        hasPriorValidatedSalaryCert = mostRecentCaseStudy.salaryCertValidated === true
+      }
+    }
+
+    const priorCase = mostRecentCase ?? (await getCaseByCaseNumber(caseNumber))
     const priorRecommendation =
       priorCase?.case_study && typeof priorCase.case_study === 'object'
         ? String((priorCase.case_study as { recommendation?: unknown }).recommendation ?? '')
         : ''
     const needsDocuments =
       priorCase?.status === 'rejected' && priorRecommendation === 'Request Documents'
-
-    // Re-submission gate: a case that is still being processed or is awaiting an
-    // officer's decision cannot be re-submitted under the same App ID — the form shows
-    // an "in process / under review" notice instead of letting them submit again.
-    const resubmission = await getResubmissionGate(caseNumber)
 
     // Smart required-documents — whether THIS situation needs an uploaded document and,
     // if so, exactly which one. The form uses this to label the upload "required" vs
@@ -63,28 +74,23 @@ export async function GET(req: NextRequest) {
       income_changed: Boolean(applicant.income_changed) || circ.income_changed,
       temporary_circumstance: circ.temporary_circumstance,
       hasIncomeRecord: Number(applicant.monthly_salary) > 0,
+      uploadedDocType: hasPriorValidatedSalaryCert ? 'salary_certificate' : undefined,
     })
 
     // Two-document round-trip stage: if the beneficiary's most recent case validated the
     // salary cert and is still awaiting a supporting document, the form should ask for that
     // supporting doc now (the salary cert is trusted forward); otherwise ask for the primary.
-    const emiratesIdForCases = String(uaePass?.emirates_id ?? applicant.emirates_id ?? '')
-    let supportingStage = false
-    if (emiratesIdForCases && required.supporting) {
-      const beneficiaryCases = await getCasesByEmiratesId(emiratesIdForCases)
-      const mostRecentCase = beneficiaryCases
-        .slice()
-        .sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')))[0]
-      const cs =
-        mostRecentCase?.case_study && typeof mostRecentCase.case_study === 'object'
-          ? (mostRecentCase.case_study as Record<string, unknown>)
-          : null
-      supportingStage = cs?.salaryCertValidated === true && !!cs?.pendingSupportingDoc
-    }
+    const supportingStage =
+      hasPriorValidatedSalaryCert &&
+      !!required.supporting &&
+      !!mostRecentCaseStudy?.pendingSupportingDoc
+
     const documentRequest =
       supportingStage && required.supporting
         ? { stage: 'supporting' as const, type: required.supporting.type, label: required.supporting.label }
         : { stage: 'primary' as const, type: required.primary.type, label: required.primary.label }
+
+    const resubmission = await getResubmissionGate(caseNumber)
 
     return NextResponse.json(
       successResponse({

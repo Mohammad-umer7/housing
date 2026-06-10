@@ -92,6 +92,8 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
   const [resubmitGate, setResubmitGate] = useState<ResubmitGate>(null)
   const [files, setFiles] = useState<File[]>([])
   const [dragging, setDragging] = useState(false)
+  const [supportingFiles, setSupportingFiles] = useState<File[]>([])
+  const [supportingDragging, setSupportingDragging] = useState(false)
   const [certified, setCertified] = useState(false)
   const [phase, setPhase] = useState<Phase>('idle')
   const [queueInfo, setQueueInfo] = useState<{ position: number; caseId: string } | null>(null)
@@ -99,14 +101,29 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [stepError, setStepError] = useState<string | null>(null)
 
+  const stepsList = needsDocuments
+    ? [
+        { num: 1, label: 'Verify Application' },
+        { num: 2, label: 'Financial Details' },
+        { num: 3, label: 'Documents' },
+        { num: 4, label: 'Review & Submit' },
+      ]
+    : [
+        { num: 1, label: 'Verify Application' },
+        { num: 2, label: 'Financial Details' },
+        { num: 3, label: 'Documents' },
+        { num: 4, label: 'Reason' },
+        { num: 5, label: 'Review & Submit' },
+      ]
+
   const signLanguageVideo =
     phase === 'confirmed'
       ? SIGN_LANGUAGE_VIDEOS.caseSubmitted
       : step === 3
         ? SIGN_LANGUAGE_VIDEOS.document
-        : step === 4
+        : step === 4 && !needsDocuments
           ? SIGN_LANGUAGE_VIDEOS.reason
-          : step === 5
+          : (step === 5 || (step === 4 && needsDocuments))
             ? null
             : SIGN_LANGUAGE_VIDEOS.financial
   useSignLanguageVideo(signLanguageVideo)
@@ -222,6 +239,19 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
     addFiles(Array.from(e.target.files || []))
   }
 
+  function addSupportingFiles(list: File[]) {
+    const pdfs = list.filter(f => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'))
+    setSupportingFiles(prev => [...prev, ...pdfs])
+  }
+  function handleSupportingDrop(e: React.DragEvent) {
+    e.preventDefault()
+    setSupportingDragging(false)
+    addSupportingFiles(Array.from(e.dataTransfer.files))
+  }
+  function handleSupportingFileInput(e: React.ChangeEvent<HTMLInputElement>) {
+    addSupportingFiles(Array.from(e.target.files || []))
+  }
+
   // Hard input-sanity gate: salary and amount due must be positive numbers.
   const salaryInvalid = form.monthly_salary.trim() !== '' && !(Number(form.monthly_salary) > 0)
   const arrearsInvalid = form.arrears_amount.trim() !== '' && !(Number(form.arrears_amount) > 0)
@@ -246,14 +276,24 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
         setStepError(`This case requires a document: ${loanDetails?.requiredDocLabel ?? 'a supporting document'}`)
         return
       }
+      if (needsDocuments) {
+        setStep(4)
+        window.scrollTo(0, 0)
+        return
+      }
     }
-    if (step < 5) { setStep(step + 1); window.scrollTo(0, 0) }
+    if (step < (needsDocuments ? 4 : 5)) { setStep(step + 1); window.scrollTo(0, 0) }
   }
   function prevStep() {
     setStepError(null)
     // Step 2 is the first wizard step (identity was done at sign-in), so Back from it goes
     // to the home page rather than to a non-existent step 1.
     if (step <= 2) { onHome(); return }
+    if (step === 4 && needsDocuments) {
+      setStep(3)
+      window.scrollTo(0, 0)
+      return
+    }
     setStep(step - 1); window.scrollTo(0, 0)
   }
 
@@ -290,6 +330,7 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
     fd.append('auto_dda', String(loanDetails.auto_dda))
     fd.append('remarks', form.remarks)
     if (files.length > 0) fd.append('salaryCertificate', files[0])
+    if (supportingFiles.length > 0) fd.append('supportingDocument', supportingFiles[0])
 
     const formDataForTracking: Record<string, string> = {
       case_number: form.case_number,
@@ -399,13 +440,13 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
         <div className="card card-pad fade-in">
           {/* Stepper header */}
           <div className="stepper-container">
-            {STEPS.map((s, idx) => (
+            {stepsList.map((s, idx) => (
               <React.Fragment key={s.num}>
                 <div className={'step' + (step === s.num ? ' active' : step > s.num ? ' completed' : '')}>
                   <div className="step-circle">{step > s.num ? '✓' : s.num}</div>
                   <div className="step-label">{t(s.label)}</div>
                 </div>
-                {idx < STEPS.length - 1 && <div className={'step-line' + (step > s.num ? ' filled' : '')} />}
+                {idx < stepsList.length - 1 && <div className={'step-line' + (step > s.num ? ' filled' : '')} />}
               </React.Fragment>
             ))}
           </div>
@@ -569,6 +610,33 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
                 <input id="saddad-file-input" type="file" accept=".pdf" className="hidden" style={{ display: 'none' }} onChange={handleFileInput} />
               </div>
 
+              {!needsDocuments && (
+                <div style={{ marginTop: 24 }}>
+                  <label style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--ink-navy)', display: 'block', marginBottom: 8 }}>
+                    <span>Supporting Document (Optional)</span>
+                    <span className="ar" style={{ float: 'right' }}>المستند الداعم (اختياري)</span>
+                  </label>
+                  <div className="file-dropzone" onClick={() => document.getElementById('saddad-supporting-file-input')?.click()}
+                    onDrop={handleSupportingDrop} onDragOver={(e) => { e.preventDefault(); setSupportingDragging(true) }} onDragLeave={() => setSupportingDragging(false)}
+                    style={supportingDragging ? { borderColor: 'var(--gold)', background: 'var(--cream-soft)' } : undefined}>
+                    <Ico.doc2 width={44} height={44} style={{ color: 'var(--gold)', opacity: 0.8 }} />
+                    {supportingFiles.length > 0 ? (
+                      <>
+                        <p style={{ margin: '16px 0 4px', fontWeight: 700, color: 'var(--green)' }}>✓ {supportingFiles[0].name}</p>
+                        <p style={{ fontSize: 13, color: 'var(--muted)' }}>Click to upload a different file</p>
+                      </>
+                    ) : (
+                      <>
+                        <p style={{ margin: '16px 0 4px', fontWeight: 700, color: 'var(--ink)' }}>Drag &amp; drop your supporting document</p>
+                        <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>PDF up to 5MB (e.g. non-work letter, medical report, bank statement)</p>
+                        <span className="btn btn-neutral">Browse Files</span>
+                      </>
+                    )}
+                    <input id="saddad-supporting-file-input" type="file" accept=".pdf" className="hidden" style={{ display: 'none' }} onChange={handleSupportingFileInput} />
+                  </div>
+                </div>
+              )}
+
               {stepError && <p style={{ color: 'var(--red)', fontSize: 13.5, marginTop: 16 }}>⚠ {stepError}</p>}
               <div style={{ display: 'flex', gap: 16, marginTop: 28 }}>
                 <button className="btn btn-neutral" style={{ flex: 1 }} onClick={prevStep}>Back / العودة</button>
@@ -578,7 +646,7 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
           )}
 
           {/* Step 4: Reason */}
-          {step === 4 && (
+          {step === 4 && !needsDocuments && (
             <div className="fade-in" style={{ textAlign: 'left' }}>
               <h3 style={{ fontSize: 22, fontWeight: 800, color: 'var(--ink-navy)', marginBottom: 6, textAlign: 'center' }}>{t('Reason for Rescheduling')}</h3>
               <p style={{ color: 'var(--muted)', fontSize: 14.5, marginBottom: 24, textAlign: 'center' }}>{t('Explain why you require a rescheduling of your housing loan payments.')}</p>
@@ -607,8 +675,8 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
             </div>
           )}
 
-          {/* Step 5: Review & Submit */}
-          {step === 5 && loanDetails && (
+          {/* Step 5: Review & Submit (or Step 4 if needsDocuments is true) */}
+          {((step === 5 && !needsDocuments) || (step === 4 && needsDocuments)) && loanDetails && (
             <div className="fade-in" style={{ textAlign: 'left' }}>
               <h3 style={{ fontSize: 22, fontWeight: 800, color: 'var(--ink-navy)', marginBottom: 6, textAlign: 'center' }}>{t('Review & Submit')}</h3>
               <p style={{ color: 'var(--muted)', fontSize: 14.5, marginBottom: 24, textAlign: 'center' }}>{t('Review your application details before submitting to SADDAD.')}</p>
@@ -633,6 +701,14 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
                       {files.length > 0 ? `✓ ${files[0].name}` : (docRequired ? 'Required — not uploaded' : 'Not uploaded (optional)')}
                     </div>
                   </div>
+                  {supportingFiles.length > 0 && (
+                    <div style={{ borderTop: '1px solid var(--line)', paddingTop: 12 }}>
+                      <label style={{ fontSize: 13, fontWeight: 800, color: 'var(--muted)' }}>Uploaded Supporting Document</label>
+                      <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--green)' }}>
+                        ✓ {supportingFiles[0].name}
+                      </div>
+                    </div>
+                  )}
                   <div style={{ borderTop: '1px solid var(--line)', paddingTop: 12 }}>
                     <label style={{ fontSize: 13, fontWeight: 800, color: 'var(--muted)' }}>Rescheduling Reason</label>
                     <div style={{ fontSize: 15, color: 'var(--body)', whiteSpace: 'pre-wrap' }}>{form.reschedule_reason}{form.remarks ? ` — ${form.remarks}` : ''}</div>

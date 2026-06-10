@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { after } from 'next/server'
 import { processCase } from '@/lib/worker'
 import {
@@ -37,6 +37,7 @@ export async function POST(req: NextRequest) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let body: Record<string, any>
     let salaryCertFile: File | null = null
+    let supportingDocFile: File | null = null
 
     if (contentType.includes('multipart/form-data')) {
       const formData = await req.formData()
@@ -61,8 +62,17 @@ export async function POST(req: NextRequest) {
       }
       // One file per submission — either the salary cert (primary stage) or the
       // reason-specific supporting document (round-trip). Read whichever is present.
-      const fileEntry = formData.get('supportingDocument') ?? formData.get('salaryCertificate')
-      if (fileEntry instanceof File && fileEntry.size > 0) salaryCertFile = fileEntry
+      const primaryEntry = formData.get('salaryCertificate')
+      const supportingEntry = formData.get('supportingDocument')
+      if (primaryEntry instanceof File && primaryEntry.size > 0 && supportingEntry instanceof File && supportingEntry.size > 0) {
+        salaryCertFile = primaryEntry
+        supportingDocFile = supportingEntry
+      } else {
+        const fileEntry = supportingEntry ?? primaryEntry
+        if (fileEntry instanceof File && fileEntry.size > 0) {
+          salaryCertFile = fileEntry
+        }
+      }
     } else {
       body = await req.json()
     }
@@ -81,6 +91,35 @@ export async function POST(req: NextRequest) {
     if (typeof case_number !== 'string' || case_number.length > 50) {
       return NextResponse.json(errorResponse('Invalid case number format', 400), { status: 400 })
     }
+    // Real PDF extraction + document forensics setup
+    let extractedPdfText = ''
+    let pdfBase64: string | null = null
+    let arrayBuffer: ArrayBuffer | null = null
+    const documentUploaded = !!salaryCertFile
+
+    let supportingExtractedText = ''
+    let pdfSupportingBase64: string | null = null
+    let supportingArrayBuffer: ArrayBuffer | null = null
+
+    if (salaryCertFile) {
+      arrayBuffer = await salaryCertFile.arrayBuffer()
+      const pdfBuf = Buffer.from(arrayBuffer.slice(0))
+      extractedPdfText = await extractTextFromPDF(arrayBuffer)
+      if (pdfBuf.byteLength <= 4 * 1024 * 1024) pdfBase64 = pdfBuf.toString('base64')
+    }
+
+    let uploadedDocType: string | undefined = undefined
+    if (extractedPdfText) {
+      const salaryStruct = checkStructure(extractedPdfText, 'salary_certificate')
+      if (salaryStruct.looksLikeExpectedDoc) {
+        uploadedDocType = 'salary_certificate'
+      } else {
+        const nonWorkStruct = checkStructure(extractedPdfText, 'non_work_letter')
+        if (nonWorkStruct.looksLikeExpectedDoc) {
+          uploadedDocType = 'non_work_letter'
+        }
+      }
+    }
 
     // Which document THIS case should have uploaded — read from the situation
     // (reschedule reason + free-text), the same classification the Document Agent
@@ -94,6 +133,7 @@ export async function POST(req: NextRequest) {
       income_changed: circ.income_changed,
       temporary_circumstance: circ.temporary_circumstance,
       hasIncomeRecord: true,
+      uploadedDocType,
     })
     // Two-document round-trip: if a prior case for this beneficiary already validated the
     // salary cert and is still awaiting the reason-specific supporting document, THIS
@@ -101,6 +141,7 @@ export async function POST(req: NextRequest) {
     // validation forward (server-authoritative; the client cannot force the stage).
     let salaryCertAlreadyValidated = false
     let carriedValidatedSalary: number | null = null
+    let carriedValidatedSalaryCertDate: string | null = null
     if (emirates_id && required.supporting) {
       const priorCases = await getCasesByEmiratesId(emirates_id)
       // Only the MOST RECENT case reflects the current state (an older, since-resolved case
@@ -115,27 +156,20 @@ export async function POST(req: NextRequest) {
       if (cs?.salaryCertValidated === true && cs?.pendingSupportingDoc) {
         salaryCertAlreadyValidated = true
         carriedValidatedSalary = Number(cs.validatedSalary) || null
+        carriedValidatedSalaryCertDate = cs.validatedSalaryCertDate ? String(cs.validatedSalaryCertDate) : null
       }
     }
     const expectedDocType =
       salaryCertAlreadyValidated && required.supporting ? required.supporting.type : required.primary.type
 
-    // Real PDF extraction + document forensics
-    let extractedPdfText = ''
     let pdfExtractedFields = null
     let pdfStructure = null
     let pdfArithmetic = null
     let pdfExtractedEid: string | null = null
     let pdfExtractedIban: string | null = null
     let pdfExtractedAccount: string | null = null
-    let pdfBase64: string | null = null
-    const documentUploaded = !!salaryCertFile
 
-    if (salaryCertFile) {
-      const arrayBuffer = await salaryCertFile.arrayBuffer()
-      const pdfBuf = Buffer.from(arrayBuffer.slice(0))
-
-      extractedPdfText = await extractTextFromPDF(arrayBuffer)
+    if (salaryCertFile && arrayBuffer) {
       // Three-tier OCR (Groq → Gemini Vision → regex fallback), doc-type aware: the
       // expected document type's profile tells the extractor exactly which fields to
       // pull (salary cert vs bank statement vs non-work letter vs medical/support doc).
@@ -150,7 +184,29 @@ export async function POST(req: NextRequest) {
       pdfExtractedEid = extractEmiratesId(extractedPdfText)
       pdfExtractedIban = extractIban(extractedPdfText)
       pdfExtractedAccount = extractAccountNumber(extractedPdfText)
-      if (pdfBuf.byteLength <= 4 * 1024 * 1024) pdfBase64 = pdfBuf.toString('base64')
+    }
+
+    const supportingDocUploaded = !!supportingDocFile
+    let pdfSupportingExtractedFields = null
+    let pdfSupportingStructure = null
+    let pdfSupportingArithmetic = null
+    let pdfSupportingExtractedEid: string | null = null
+    let pdfSupportingExtractedIban: string | null = null
+    let pdfSupportingExtractedAccount: string | null = null
+
+    if (supportingDocUploaded && supportingDocFile) {
+      supportingArrayBuffer = await supportingDocFile.arrayBuffer()
+      const pdfBuf = Buffer.from(supportingArrayBuffer.slice(0))
+      supportingExtractedText = await extractTextFromPDF(supportingArrayBuffer)
+      if (pdfBuf.byteLength <= 4 * 1024 * 1024) pdfSupportingBase64 = pdfBuf.toString('base64')
+
+      const expectedSupportingType = required.supporting ? required.supporting.type : 'supporting_document'
+      pdfSupportingExtractedFields = await extractDocumentFields(supportingExtractedText, supportingArrayBuffer, expectedSupportingType)
+      pdfSupportingStructure = supportingExtractedText.length >= 40 ? checkStructure(supportingExtractedText, expectedSupportingType) : null
+      pdfSupportingArithmetic = checkArithmetic(supportingExtractedText)
+      pdfSupportingExtractedEid = extractEmiratesId(supportingExtractedText)
+      pdfSupportingExtractedIban = extractIban(supportingExtractedText)
+      pdfSupportingExtractedAccount = extractAccountNumber(supportingExtractedText)
     }
 
     // Enrich the job payload with PDF extraction + forensic results. The raw extracted
@@ -192,9 +248,20 @@ export async function POST(req: NextRequest) {
       // validation and only validates the supporting document uploaded in this submission.
       salaryCertAlreadyValidated,
       validatedSalary: carriedValidatedSalary,
+      validatedSalaryCertDate: carriedValidatedSalaryCertDate,
       documents: documentUploaded
-        ? [expectedDocType]
+        ? (supportingDocUploaded && required.supporting ? [expectedDocType, required.supporting.type] : [expectedDocType])
         : (Array.isArray(body.documents) ? body.documents : [expectedDocType]),
+      // Supporting document fields:
+      supportingDocUploaded,
+      pdfSupportingExpectedDocType: required.supporting?.type ?? null,
+      pdfSupportingExtractedFields,
+      pdfSupportingStructure,
+      pdfSupportingArithmetic,
+      pdfSupportingExtractedEid,
+      pdfSupportingExtractedIban,
+      pdfSupportingExtractedAccount,
+      pdfSupportingBase64,
     }
 
     // TESTING ONLY — clean any stale rows for this exact case number (no-op for a fresh
