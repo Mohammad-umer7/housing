@@ -16,7 +16,7 @@ const nextConfig: NextConfig = {
     'jsqr',
     '@langchain/langgraph',
     '@langchain/core',
-    '@langchain/groq',
+    '@langchain/openai',
   ],
 };
 

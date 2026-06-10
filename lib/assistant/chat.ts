@@ -4,7 +4,7 @@
 //   • degrades gracefully (no GROQ key / LLM error) to an on-topic fallback
 // The API route stays thin and just hands user input + resolved case context here.
 
-import { getChatModel } from '@/lib/llm/client'
+import { getChatModel, isLLMConfigured } from '@/lib/llm/client'
 import {
   assistantSystemPrompt,
   assistantFallbackReply,
@@ -64,7 +64,7 @@ export async function runAssistant({
   }
 
   // No key → on-topic offline guidance rather than an error.
-  if (!process.env.GROQ_API_KEY) {
+  if (!isLLMConfigured()) {
     return { reply: assistantFallbackReply(), source: 'fallback' }
   }
 

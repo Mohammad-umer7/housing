@@ -606,6 +606,66 @@ export async function getJobFormDataBase64(caseNumber: string): Promise<string |
   return fd.pdfBase64
 }
 
+export type CaseAttachment = {
+  index: number
+  role: 'primary' | 'supporting' | 'additional'
+  filename: string
+  mimeType: string
+  base64: string
+  description: string
+  size: number
+}
+
+export type CaseDocumentManifest = {
+  requestDescription: string | null
+  documents: Omit<CaseAttachment, 'base64'>[]
+}
+
+// Returns all uploaded documents for a case, with base64 data.
+export async function getCaseAttachments(caseNumber: string): Promise<CaseAttachment[]> {
+  const { data } = await supabaseAdmin
+    .from('job_queue')
+    .select('form_data')
+    .eq('case_number', caseNumber)
+    .order('queued_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (!data) return []
+  const fd = data.form_data as Record<string, unknown> | null
+  if (!fd) return []
+
+  // New unified format
+  if (Array.isArray(fd.attachedDocuments) && fd.attachedDocuments.length > 0) {
+    return fd.attachedDocuments as CaseAttachment[]
+  }
+  // Legacy: pdfBase64 only
+  if (typeof fd.pdfBase64 === 'string' && fd.pdfBase64) {
+    const attachments: CaseAttachment[] = [{ index: 0, role: 'primary', filename: 'salary-certificate.pdf', mimeType: 'application/pdf', base64: fd.pdfBase64, description: '', size: 0 }]
+    if (typeof fd.pdfSupportingBase64 === 'string' && fd.pdfSupportingBase64) {
+      attachments.push({ index: 1, role: 'supporting', filename: 'supporting-document.pdf', mimeType: 'application/pdf', base64: fd.pdfSupportingBase64, description: '', size: 0 })
+    }
+    return attachments
+  }
+  return []
+}
+
+// Returns the document manifest (metadata only, no base64) plus the citizen's request description.
+export async function getCaseDocumentManifest(caseNumber: string): Promise<CaseDocumentManifest> {
+  const { data } = await supabaseAdmin
+    .from('job_queue')
+    .select('form_data')
+    .eq('case_number', caseNumber)
+    .order('queued_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  const fd = data?.form_data as Record<string, unknown> | null
+  const docs = await getCaseAttachments(caseNumber)
+  return {
+    requestDescription: fd?.requestDescription ? String(fd.requestDescription) : null,
+    documents: docs.map(({ base64: _b, ...rest }) => rest),
+  }
+}
+
 // ── System Settings (admin-configurable key-value store) ─────────────────────
 // Used to persist admin-edited chatbot custom instructions per role and the
 // governance rule overrides. The system_settings table may not exist in all

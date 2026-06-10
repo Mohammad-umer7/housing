@@ -1,106 +1,85 @@
-// Single LLM access point for the whole pipeline — now built on LangChain's
-// ChatGroq.
-//
-// Swapping the model or provider — e.g. Groq → a UAE-sovereign model (G42 Jais /
-// TII Falcon-Arabic) for production — is a change to THIS FILE ONLY. Every agent
-// node builds its model via getChatModel()/getStructuredModel()/getToolCallingModel(),
-// so the provider, model name, timeout, retry policy and API-key failover live in one
-// place (overridable by env).
-//
-// Resilience the regulated pipeline depends on is configured here:
-//   • request timeout so a hung connection never stalls a case
-//   • bounded retries with backoff on transient failures (429 / 5xx / network)
-//   • MULTI-KEY FAILOVER — if the primary Groq key is rate-limited or errors, the next
-//     configured key is tried automatically (LangChain .withFallbacks).
-// Callers keep their own try/catch + graceful fallbacks, so an LLM outage degrades a
-// step — it never hangs the pipeline.
+/**
+ * Single LLM access point for the entire pipeline — OpenRouter with circular
+ * multi-key, multi-model rotation and automatic failover via rotation-manager.
+ *
+ * Swapping provider, keys, or model order is a change to .env.local ONLY.
+ * Every agent builds its model via getChatModel / getStructuredModel / getToolCallingModel,
+ * so all routing, failover, and observability live in rotation-manager.ts.
+ */
 
-import { ChatGroq } from '@langchain/groq'
+import { ChatOpenAI } from '@langchain/openai'
 import type { z } from 'zod'
 import type { Runnable } from '@langchain/core/runnables'
 import type { BaseLanguageModelInput } from '@langchain/core/language_models/base'
 import type { AIMessageChunk } from '@langchain/core/messages'
+import { getAllSlots, buildClient, isConfigured } from './rotation-manager'
 
-export const LLM_MODEL = process.env.LLM_MODEL ?? 'llama-3.3-70b-versatile'
-const TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS) || 15000
-const MAX_RETRIES = Number(process.env.LLM_MAX_RETRIES) || 2
+/** Active model name — used in audit-trail fields (escalation-agent, etc.). */
+export const LLM_MODEL =
+  process.env.OPENROUTER_MODEL_1 ?? process.env.LLM_MODEL ?? 'openai/gpt-oss-20b:free'
 
 export type ModelOptions = {
   temperature?: number
-  maxTokens?: number
+  maxTokens?:   number
 }
 
-// All configured Groq API keys, primary first. Failover order:
-//   GROQ_API_KEY → GROQ_API_KEY_2 → GROQ_API_KEY_3 (plus any comma-separated GROQ_API_KEYS).
-// NOTE: Groq's DAILY token limit is per-ORGANIZATION. A backup key from the SAME Groq
-// account shares that daily cap — failover still rescues per-minute rate limits and
-// transient 5xx/network errors, but for true daily-cap failover the backup key must
-// belong to a SEPARATE Groq account.
-function groqApiKeys(): string[] {
-  const raw = [
-    process.env.GROQ_API_KEY,
-    process.env.GROQ_API_KEY_2,
-    process.env.GROQ_API_KEY_3,
-    ...String(process.env.GROQ_API_KEYS ?? '').split(','),
-  ]
-  const keys = raw.map((k) => (k ?? '').trim()).filter(Boolean)
-  return Array.from(new Set(keys))
+/** True when at least one OpenRouter API key is configured. */
+export function isLLMConfigured(): boolean {
+  return isConfigured()
 }
 
-// One ChatGroq instance per configured key (primary first).
-function buildModels(opts: ModelOptions): ChatGroq[] {
-  const keys = groqApiKeys()
-  // If none parsed, fall back to a single instance that reads GROQ_API_KEY itself.
-  const list: (string | undefined)[] = keys.length ? keys : [process.env.GROQ_API_KEY]
-  return list.map(
-    (apiKey) =>
-      new ChatGroq({
-        model: LLM_MODEL,
-        apiKey,
-        temperature: opts.temperature ?? 0.1,
-        maxTokens: opts.maxTokens ?? 800,
-        timeout: TIMEOUT_MS,
-        maxRetries: MAX_RETRIES,
-      }),
-  )
+// Build an ordered list of ChatOpenAI instances for the failover chain.
+function buildRotationChain(opts: ModelOptions): ChatOpenAI[] {
+  return getAllSlots().map(s => buildClient(s.key, s.model, opts))
 }
 
-// Chain per-key runnables so a failure on the primary key automatically retries on the
-// next key (rate limit / 5xx / network). Single key → returned as-is (no overhead).
-function withKeyFailover<I, O>(runnables: Runnable<I, O>[]): Runnable<I, O> {
+// Chain runnables so a failure on the current slot automatically falls through
+// to the next (rate-limit / 5xx / network / schema validation error).
+function withFailover<I, O>(runnables: Runnable<I, O>[]): Runnable<I, O> {
   const [primary, ...rest] = runnables
   return rest.length ? primary.withFallbacks(rest) : primary
 }
 
-// Base chat model on the PRIMARY key (no failover wrapper, so callers can still call
-// instance methods like .bindTools). Tool-calling agents should prefer
-// getToolCallingModel() below to get failover.
-export function getChatModel(opts: ModelOptions = {}): ChatGroq {
-  return buildModels(opts)[0]
+/**
+ * Base chat model for free-form generation (assistant chat, streaming).
+ * Returns a single ChatOpenAI instance at the current rotation position.
+ * Instance methods (bindTools, etc.) are accessible on the returned object.
+ */
+export function getChatModel(opts: ModelOptions = {}): ChatOpenAI {
+  const slots = getAllSlots()
+  if (slots.length === 0) throw new Error('[llm] No OpenRouter API keys configured')
+  return buildClient(slots[0].key, slots[0].model, opts)
 }
 
-// Structured-output model with automatic key failover: parses the response into the
-// given Zod schema (type-safe, no manual JSON handling). Used by every single-shot JSON
-// agent (planner, rules, reconcile, communication, document extraction).
+/**
+ * Structured-output model with full rotation failover.
+ * Parses the LLM response into the given Zod schema — type-safe, no manual JSON.
+ * Used by every single-shot JSON agent: planner, rules, communication, extraction.
+ */
 export function getStructuredModel<T extends z.ZodTypeAny>(
   schema: T,
   opts: ModelOptions = {},
 ): Runnable<BaseLanguageModelInput, z.infer<T>> {
-  const runnables = buildModels(opts).map(
-    (m) =>
-      m.withStructuredOutput(schema) as unknown as Runnable<BaseLanguageModelInput, z.infer<T>>,
+  const models = buildRotationChain(opts)
+  if (models.length === 0) throw new Error('[llm] No OpenRouter API keys configured')
+  const runnables = models.map(
+    m => m.withStructuredOutput(schema) as unknown as Runnable<BaseLanguageModelInput, z.infer<T>>,
   )
-  return withKeyFailover(runnables)
+  return withFailover(runnables)
 }
 
-// Tool-calling model (for the agentic subgraphs — Critic, Recovery) with automatic key
-// failover. Binds the given tools to each per-key instance before chaining the fallback.
+/**
+ * Tool-calling model with rotation failover.
+ * Used by the agentic subgraphs — Critic and Recovery — that call LangGraph tools.
+ */
 export function getToolCallingModel(
-  tools: Parameters<ChatGroq['bindTools']>[0],
+  tools: Parameters<ChatOpenAI['bindTools']>[0],
   opts: ModelOptions = {},
 ): Runnable<BaseLanguageModelInput, AIMessageChunk> {
-  const runnables = buildModels(opts).map(
-    (m) => m.bindTools(tools) as unknown as Runnable<BaseLanguageModelInput, AIMessageChunk>,
+  const models = buildRotationChain(opts)
+  if (models.length === 0) throw new Error('[llm] No OpenRouter API keys configured')
+  const runnables = models.map(
+    m => m.bindTools(tools) as unknown as Runnable<BaseLanguageModelInput, AIMessageChunk>,
   )
-  return withKeyFailover(runnables)
+  return withFailover(runnables)
 }

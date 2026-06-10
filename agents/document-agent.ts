@@ -94,6 +94,7 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
       employeeName?: string | null
       monthlySalary?: number | null
       employerName?: string | null
+      issueDate?: string | null
       confidence?: number
       source?: string
     }
@@ -120,6 +121,7 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
 
     let verificationReport: VerificationReport
     let supportingReport: VerificationReport | null = null
+    let vision: VisionAssessment | null = null
 
     if (documentUploaded) {
       // Gemini VISION review runs HERE in the background (not in the submission route),
@@ -129,7 +131,7 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
       // non-fatal: a null result (no key / 503 / timeout / circuit open) leaves the
       // vision check N/A and the deterministic forensics decide alone (fallback).
       const pdfBase64 = typeof formData.pdfBase64 === 'string' ? formData.pdfBase64 : null
-      const vision: VisionAssessment | null = pdfBase64
+      vision = pdfBase64
         ? await assessDocumentAuthenticity(Buffer.from(pdfBase64, 'base64'), expectedType)
         : null
 
@@ -382,7 +384,7 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
     const validatedSalaryCertDate =
       stage === 'primary' && accepted
         ? (extractedFields.issueDate ?? vision?.observed?.issueDate ?? null)
-        : (formData.validatedSalaryCertDate ?? null)
+        : (formData.validatedSalaryCertDate ? String(formData.validatedSalaryCertDate) : null)
 
     return {
       docResult: {

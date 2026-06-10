@@ -15,6 +15,8 @@ import { useA11y } from '@/components/AccessibilityProvider'
 type AgentStep = { agentName: string; status: string; durationMs: number | null; resultSummary: string }
 type AuditEntry = { id: string; action: string; decision: string | null; rationale: string | null; processedBy: string | null; timestamp: string | null }
 type AdminOverride = { by: string; at: string; note: string; from: string; to: string }
+type DocEntry = { index: number; role: 'primary' | 'supporting' | 'additional'; filename: string; mimeType: string; description: string; size: number }
+type DocManifest = { requestDescription: string | null; documents: DocEntry[] }
 
 type CaseDetail = {
   case_number: string
@@ -93,6 +95,7 @@ export default function AdminCaseDetailPage() {
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [actionMsg, setActionMsg] = useState<string | null>(null)
+  const [docsManifest, setDocsManifest] = useState<DocManifest | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -114,7 +117,19 @@ export default function AdminCaseDetailPage() {
     void load()
   }
 
-  useEffect(() => { void (async () => { await load() })() }, [load])
+  useEffect(() => {
+    void (async () => {
+      await load()
+    })()
+  }, [load])
+
+  useEffect(() => {
+    if (!id) return
+    fetch(`/api/officer/cases/${encodeURIComponent(id)}/document?list=1`, { credentials: 'include', cache: 'no-store' })
+      .then(r => r.json())
+      .then(j => { if (j.success) setDocsManifest(j.data) })
+      .catch(() => null)
+  }, [id])
 
   async function submitOverride() {
     if (!caseData) return
@@ -204,10 +219,58 @@ export default function AdminCaseDetailPage() {
               {caseData.risk_level && <Row k={t('Risk Level')} v={caseData.risk_level} />}
               {caseData.risk_score != null && <Row k={t('Risk Score')} v={String(caseData.risk_score)} />}
               {caseData.processed_at && <Row k={t('Processed')} v={new Date(caseData.processed_at).toLocaleString('en-AE')} />}
-              <a className="btn btn-neutral btn-block" style={{ marginTop: 16 }}
-                href={`/api/officer/cases/${encodeURIComponent(caseData.case_number)}/document`} target="_blank" rel="noreferrer">
-                <Ico.doc2 width={16} height={16} /> {t('View Uploaded Certificate', 'عرض الشهادة المرفوعة')}
-              </a>
+              {/* Documents panel */}
+              <div style={{ marginTop: 16 }}>
+                {docsManifest?.requestDescription && (
+                  <div style={{ background: 'var(--blue-soft)', border: '1px solid #cdddef', borderRadius: 'var(--r-sm)', padding: '10px 12px', marginBottom: 12, fontSize: 13.5 }}>
+                    <span style={{ fontWeight: 800, color: 'var(--blue)', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '.06em', display: 'block', marginBottom: 4 }}>Citizen Request</span>
+                    {docsManifest.requestDescription}
+                  </div>
+                )}
+                {docsManifest && docsManifest.documents.length > 0 ? (
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    {docsManifest.documents.map(doc => {
+                      const docUrl = `/api/officer/cases/${encodeURIComponent(caseData.case_number)}/document?index=${doc.index}`
+                      const isImage = doc.mimeType.startsWith('image/')
+                      const roleLabel = doc.role === 'primary' ? 'Primary' : doc.role === 'supporting' ? 'Supporting' : 'Additional'
+                      const rolePill = doc.role === 'primary' ? 'pill-gold' : doc.role === 'supporting' ? 'pill-blue' : 'pill-gray'
+                      const sizeKb = doc.size > 0 ? ` · ${(doc.size / 1024).toFixed(0)} KB` : ''
+                      return (
+                        <div key={doc.index} style={{ border: '1px solid var(--line)', borderRadius: 'var(--r-sm)', padding: '10px 12px', background: 'var(--panel-alt)' }}>
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: doc.description ? 6 : 0 }}>
+                            <Ico.doc2 width={14} height={14} style={{ color: 'var(--gold)', flexShrink: 0, marginTop: 2 }} />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.filename}</div>
+                              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+                                <span className={'pill ' + rolePill} style={{ fontSize: 10.5, padding: '1px 6px' }}>{roleLabel}</span>
+                                <span style={{ marginLeft: 6 }}>{doc.mimeType}{sizeKb}</span>
+                              </div>
+                            </div>
+                          </div>
+                          {doc.description && (
+                            <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '0 0 8px', paddingLeft: 22 }}>{doc.description}</p>
+                          )}
+                          <div style={{ display: 'flex', gap: 8, paddingLeft: 22 }}>
+                            <a className="btn btn-neutral" style={{ fontSize: 12.5, padding: '5px 10px' }}
+                              href={docUrl} target={isImage ? '_blank' : '_blank'} rel="noreferrer">
+                              <Ico.doc2 width={13} height={13} /> View
+                            </a>
+                            <a className="btn btn-neutral" style={{ fontSize: 12.5, padding: '5px 10px' }}
+                              href={`${docUrl}&download=1`} download>
+                              ↓ Download
+                            </a>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <a className="btn btn-neutral btn-block"
+                    href={`/api/officer/cases/${encodeURIComponent(caseData.case_number)}/document`} target="_blank" rel="noreferrer">
+                    <Ico.doc2 width={16} height={16} /> {t('View Uploaded Certificate', 'عرض الشهادة المرفوعة')}
+                  </a>
+                )}
+              </div>
             </div>
 
             {/* Panel 2 — AI Analysis */}

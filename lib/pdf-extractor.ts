@@ -14,7 +14,7 @@
 //            'regex_fallback' so downstream agents can tag it "(fallback)".
 
 import { z } from 'zod'
-import { getStructuredModel } from './llm/client'
+import { getStructuredModel, isLLMConfigured } from './llm/client'
 import { isRateLimitError, extractRetryAfter } from './llm/errors'
 import { extractFieldsWithGemini } from './llm/gemini'
 import { DOC_TYPE_PROFILES, type ExpectedDocType } from './document-forensics'
@@ -27,7 +27,7 @@ const ExtractedFieldsSchema = z.object({
   confidence: z.number(),
 })
 
-export type ExtractionSource = 'groq_llm' | 'gemini_vision' | 'regex_fallback' | 'none'
+export type ExtractionSource = 'llm' | 'gemini_vision' | 'regex_fallback' | 'none'
 
 export type ExtractedDocFields = {
   employeeName: string | null
@@ -175,8 +175,8 @@ export async function extractDocumentFields(
 ): Promise<ExtractedDocFields> {
   const profile = DOC_TYPE_PROFILES[expectedType]
 
-  // ── Tier 1: Groq LLM on the extracted text ─────────────────────────────────
-  if (pdfText && pdfText.length >= 20 && process.env.GROQ_API_KEY) {
+  // ── Tier 1: OpenRouter LLM on the extracted text ──────────────────────────
+  if (pdfText && pdfText.length >= 20 && isLLMConfigured()) {
     const fieldList = profile.fields.map((f) => `- ${f.key}: ${f.description}`).join('\n')
     const prompt = `Extract the following fields from this ${profile.label}. Use null for any field you cannot find (including any field not listed for this document type), and a confidence between 0 and 1.
 
@@ -193,16 +193,15 @@ ${pdfText.slice(0, 2000)}`
         ['human', prompt],
       ])
       if (parsed) {
-        console.log(`[pdf-extractor] Groq LLM extraction (${expectedType}) — confidence ${parsed.confidence}`)
-        return { ...parsed, source: 'groq_llm' }
+        console.log(`[pdf-extractor] LLM extraction (${expectedType}) — confidence ${parsed.confidence}`)
+        return { ...parsed, source: 'llm' }
       }
     } catch (err) {
       if (isRateLimitError(err)) {
         const retryAfter = extractRetryAfter(err)
-        console.warn(`[pdf-extractor] Groq rate-limited${retryAfter ? ` (retry in ${retryAfter})` : ''} — trying Gemini Vision`)
-        // Fall through to Tier 2.
+        console.warn(`[pdf-extractor] LLM rate-limited${retryAfter ? ` (retry in ${retryAfter})` : ''} — trying Gemini Vision`)
       } else {
-        console.warn('[pdf-extractor] Groq extraction failed — trying Gemini Vision:', String(err))
+        console.warn('[pdf-extractor] LLM extraction failed — trying Gemini Vision:', String(err))
       }
     }
   }

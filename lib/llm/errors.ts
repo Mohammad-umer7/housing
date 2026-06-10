@@ -1,6 +1,6 @@
-// Shared error helpers for the document-review path (adopted from the Desktop fork
-// backend). Used to recognise provider rate-limit / quota errors so the OCR tiers can
-// fall through (Groq → Gemini Vision → regex) instead of hard-failing.
+// Shared error helpers for the document-review path.
+// Used to recognise provider rate-limit / quota errors so the OCR tiers can
+// fall through (OpenRouter LLM → Gemini Vision → regex) instead of hard-failing.
 
 export function isRateLimitError(err: unknown, status?: number): boolean {
   if (status === 429) return true

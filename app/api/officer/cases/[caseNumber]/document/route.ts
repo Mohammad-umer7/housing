@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/middleware/auth'
-import { getJobFormDataBase64 } from '@/lib/data-layer'
+import { getCaseAttachments, getCaseDocumentManifest } from '@/lib/data-layer'
 import { errorResponse } from '@/lib/api-response'
 
 // GET /api/officer/cases/[caseNumber]/document
-// Streams the citizen-uploaded salary certificate back to the officer.
-// ?download=1  → Content-Disposition: attachment  (forces Save As)
-// (default)    → Content-Disposition: inline       (opens in browser PDF viewer)
+// Streams a citizen-uploaded document back to the officer.
+//
+// Query params:
+//   ?list=1        → returns JSON manifest (no binary, all docs metadata)
+//   ?index=N       → download specific document by index (0=primary, 1=supporting, 2+=additional)
+//   ?download=1    → Content-Disposition: attachment  (forces Save As)
+//   (default)      → index 0, Content-Disposition: inline
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ caseNumber: string }> }
@@ -19,28 +23,41 @@ export async function GET(
 
   try {
     const { caseNumber } = await params
-    const base64 = await getJobFormDataBase64(caseNumber)
+    const sp = req.nextUrl.searchParams
 
-    if (!base64) {
+    // ?list=1 — return metadata manifest (no base64 blobs)
+    if (sp.get('list') === '1') {
+      const manifest = await getCaseDocumentManifest(caseNumber)
+      return NextResponse.json({ success: true, data: manifest })
+    }
+
+    const docs = await getCaseAttachments(caseNumber)
+
+    if (docs.length === 0) {
       return NextResponse.json(
         errorResponse('No document was uploaded for this case.', 404),
         { status: 404 }
       )
     }
 
-    const buffer = Buffer.from(base64, 'base64')
-    const forceDownload = req.nextUrl.searchParams.get('download') === '1'
-    const filename = `salary-certificate-${caseNumber}.pdf`
+    // Which document to serve (default: first / primary)
+    const rawIndex = sp.get('index')
+    const targetIndex = rawIndex != null ? parseInt(rawIndex, 10) : 0
+    const doc = docs.find(d => d.index === targetIndex) ?? docs[0]
+
+    const buffer = Buffer.from(doc.base64, 'base64')
+    const forceDownload = sp.get('download') === '1'
+    const ext = doc.filename.split('.').pop() || 'bin'
+    const safeFilename = `document-${caseNumber.replace(/[^a-zA-Z0-9-]/g, '_')}-${doc.index}.${ext}`
 
     return new NextResponse(new Uint8Array(buffer), {
       status: 200,
       headers: {
-        'Content-Type': 'application/pdf',
+        'Content-Type': doc.mimeType || 'application/octet-stream',
         'Content-Length': String(buffer.byteLength),
         'Content-Disposition': forceDownload
-          ? `attachment; filename="${filename}"`
-          : `inline; filename="${filename}"`,
-        // Officers may only access this through the portal session — no caching.
+          ? `attachment; filename="${safeFilename}"`
+          : `inline; filename="${safeFilename}"`,
         'Cache-Control': 'no-store',
       },
     })

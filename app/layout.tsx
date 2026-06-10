@@ -42,7 +42,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${jakarta.variable} ${plexArabic.variable}`}>
-      <body>
+      <body suppressHydrationWarning>
         <TTSProvider>
           <AccessibilityProvider>
             <SignLanguageProvider>

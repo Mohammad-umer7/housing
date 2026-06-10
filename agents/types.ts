@@ -53,6 +53,7 @@ export type DocResult = {
   pendingSupportingDoc?: { type: string; label: string } | null
   salaryCertValidated?: boolean
   validatedSalary?: number | null
+  validatedSalaryCertDate?: string | null
 }
 
 // ── Fairness ────────────────────────────────────────────────────────────────��─

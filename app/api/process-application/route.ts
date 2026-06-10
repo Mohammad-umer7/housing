@@ -39,6 +39,7 @@ export async function POST(req: NextRequest) {
     let body: Record<string, any>
     let salaryCertFile: File | null = null
     let supportingDocFile: File | null = null
+    const extraFileEntries: { file: File; description: string }[] = []
 
     if (contentType.includes('multipart/form-data')) {
       const formData = await req.formData()
@@ -60,6 +61,9 @@ export async function POST(req: NextRequest) {
         total_loan_amount: formData.get('total_loan_amount'),
         auto_dda: formData.get('auto_dda'),
         documents: formData.get('documents') ? [formData.get('documents')] : [],
+        request_description: formData.get('request_description') ?? '',
+        primary_description: formData.get('primary_description') ?? '',
+        supporting_description: formData.get('supporting_description') ?? '',
       }
       // One file per submission — either the salary cert (primary stage) or the
       // reason-specific supporting document (round-trip). Read whichever is present.
@@ -73,6 +77,13 @@ export async function POST(req: NextRequest) {
         if (fileEntry instanceof File && fileEntry.size > 0) {
           salaryCertFile = fileEntry
         }
+      }
+      // Collect citizen-uploaded extra supporting documents (any format, up to 10)
+      for (let i = 0; i < 10; i++) {
+        const ef = formData.get(`extra_file_${i}`)
+        if (!(ef instanceof File) || ef.size === 0) break
+        const desc = String(formData.get(`extra_description_${i}`) ?? '').replace(/<[^>]*>/g, '').trim()
+        extraFileEntries.push({ file: ef, description: desc })
       }
     } else {
       body = await req.json()
@@ -191,6 +202,10 @@ export async function POST(req: NextRequest) {
     // Only fires when the document embeds a CryptoSignatureToken (see lib/doc-hash-verify.ts).
     const pdfHashIntegrity = extractedPdfText ? checkHashIntegrity(extractedPdfText) : null
 
+    const requestDescription = sanitize(body.request_description)
+    const primaryDescription = sanitize(body.primary_description)
+    const supportingDescription = sanitize(body.supporting_description)
+
     const supportingDocUploaded = !!supportingDocFile
     let pdfSupportingExtractedFields = null
     let pdfSupportingStructure = null
@@ -268,6 +283,9 @@ export async function POST(req: NextRequest) {
       pdfSupportingExtractedIban,
       pdfSupportingExtractedAccount,
       pdfSupportingBase64,
+      // Unified document manifest (all uploaded files with metadata)
+      requestDescription,
+      attachedDocuments,
     }
 
     // TESTING ONLY — clean any stale rows for this exact case number (no-op for a fresh

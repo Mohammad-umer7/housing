@@ -102,6 +102,11 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
   const [savedFormData, setSavedFormData] = useState<Record<string, string> | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [stepError, setStepError] = useState<string | null>(null)
+  const [requestDescription, setRequestDescription] = useState('')
+  const [primaryDescription, setPrimaryDescription] = useState('')
+  const [supportingDescription, setSupportingDescription] = useState('')
+  const [additionalDocs, setAdditionalDocs] = useState<{ file: File; description: string }[]>([])
+  const [additionalDragging, setAdditionalDragging] = useState(false)
 
   const stepsList = needsDocuments
     ? [
@@ -256,6 +261,17 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
     addSupportingFiles(Array.from(e.target.files || []))
   }
 
+  const EXTRA_ALLOWED_TYPES = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/msword', 'image/jpeg', 'image/png']
+  const EXTRA_ALLOWED_EXTS = ['.pdf', '.docx', '.doc', '.jpg', '.jpeg', '.png']
+  function addExtraFiles(list: File[]) {
+    const valid = list.filter(f => EXTRA_ALLOWED_TYPES.includes(f.type) || EXTRA_ALLOWED_EXTS.some(ext => f.name.toLowerCase().endsWith(ext)))
+    setAdditionalDocs(prev => [...prev, ...valid.map(f => ({ file: f, description: '' }))].slice(0, 10))
+  }
+  function handleExtraDrop(e: React.DragEvent) { e.preventDefault(); setAdditionalDragging(false); addExtraFiles(Array.from(e.dataTransfer.files)) }
+  function handleExtraFileInput(e: React.ChangeEvent<HTMLInputElement>) { addExtraFiles(Array.from(e.target.files ?? [])) }
+  function removeExtraDoc(idx: number) { setAdditionalDocs(prev => prev.filter((_, i) => i !== idx)) }
+  function updateExtraDesc(idx: number, desc: string) { setAdditionalDocs(prev => prev.map((d, i) => i === idx ? { ...d, description: desc } : d)) }
+
   // Hard input-sanity gate: salary and amount due must be positive numbers.
   const salaryInvalid = form.monthly_salary.trim() !== '' && !(Number(form.monthly_salary) > 0)
   const arrearsInvalid = form.arrears_amount.trim() !== '' && !(Number(form.arrears_amount) > 0)
@@ -336,6 +352,13 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
     fd.append('remarks', form.remarks)
     if (files.length > 0) fd.append('salaryCertificate', files[0])
     if (supportingFiles.length > 0) fd.append('supportingDocument', supportingFiles[0])
+    if (requestDescription.trim()) fd.append('request_description', requestDescription.trim())
+    if (primaryDescription.trim()) fd.append('primary_description', primaryDescription.trim())
+    if (supportingDescription.trim()) fd.append('supporting_description', supportingDescription.trim())
+    additionalDocs.forEach((doc, idx) => {
+      fd.append(`extra_file_${idx}`, doc.file)
+      fd.append(`extra_description_${idx}`, doc.description.trim())
+    })
 
     const formDataForTracking: Record<string, string> = {
       case_number: form.case_number,
@@ -593,6 +616,13 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
             <div className="fade-in">
               <h3 style={{ fontSize: 22, fontWeight: 800, color: 'var(--ink-navy)', marginBottom: 6 }}>{t('Upload Documents')}</h3>
               <p style={{ color: 'var(--muted)', fontSize: 14.5, marginBottom: 8 }}>{t('Please upload the required document to verify your request.')}</p>
+              <div className="field" style={{ marginBottom: 20, marginTop: 16 }}>
+                <label><span>What are you requesting?</span><span className="ar">ما الذي تطلبه؟</span></label>
+                <textarea className="input" rows={3}
+                  placeholder="Briefly describe what you are requesting, e.g. I am applying for a rescheduling due to a recent salary reduction…"
+                  style={{ fontFamily: 'inherit', resize: 'vertical', fontSize: 13.5 }}
+                  value={requestDescription} onChange={e => setRequestDescription(e.target.value)} />
+              </div>
               {(() => {
                 const reason = form.reschedule_reason
                 const stage = loanDetails?.docStage ?? 'primary'
@@ -651,6 +681,11 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
                           )}
                           <input id="saddad-file-input" type="file" accept=".pdf" className="hidden" style={{ display: 'none' }} onChange={handleFileInput} />
                         </div>
+                        {files.length > 0 && (
+                          <input type="text" className="input" placeholder="Brief description of this document (optional)"
+                            style={{ marginTop: 10, fontSize: 13 }}
+                            value={primaryDescription} onChange={e => setPrimaryDescription(e.target.value)} />
+                        )}
                       </>
                     )}
 
@@ -682,11 +717,53 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
                           )}
                           <input id="saddad-supporting-file-input" type="file" accept=".pdf" className="hidden" style={{ display: 'none' }} onChange={handleSupportingFileInput} />
                         </div>
+                        {supportingFiles.length > 0 && (
+                          <input type="text" className="input" placeholder="Brief description of this document (optional)"
+                            style={{ marginTop: 10, fontSize: 13 }}
+                            value={supportingDescription} onChange={e => setSupportingDescription(e.target.value)} />
+                        )}
                       </div>
                     )}
                   </>
                 )
               })()}
+
+              <div style={{ marginTop: 28, borderTop: '1px solid var(--line)', paddingTop: 20 }}>
+                <p style={{ fontSize: 12, fontWeight: 800, color: 'var(--muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Additional Documents <span style={{ fontWeight: 400, textTransform: 'none' }}>(optional)</span>
+                </p>
+                <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>
+                  Upload any extra supporting files — PDF, Word (.docx), JPEG, or PNG, up to 5 MB each.
+                </p>
+                {additionalDocs.map((doc, idx) => (
+                  <div key={idx} style={{ border: '1px solid var(--line)', borderRadius: 'var(--r-sm)', padding: '10px 12px', marginBottom: 10, background: 'var(--panel-alt)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)' }}>📎 {doc.file.name}</span>
+                      <button type="button" onClick={() => removeExtraDoc(idx)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: 13, fontWeight: 700, padding: '0 4px' }}>
+                        ✕ Remove
+                      </button>
+                    </div>
+                    <input type="text" className="input" placeholder="Document description (optional)"
+                      style={{ fontSize: 13 }}
+                      value={doc.description} onChange={e => updateExtraDesc(idx, e.target.value)} />
+                  </div>
+                ))}
+                {additionalDocs.length < 10 && (
+                  <div className="file-dropzone"
+                    style={{ padding: '14px 20px', ...(additionalDragging ? { borderColor: 'var(--gold)', background: 'var(--cream-soft)' } : {}) }}
+                    onClick={() => document.getElementById('saddad-extra-file-input')?.click()}
+                    onDrop={handleExtraDrop}
+                    onDragOver={e => { e.preventDefault(); setAdditionalDragging(true) }}
+                    onDragLeave={() => setAdditionalDragging(false)}>
+                    <Ico.doc2 width={32} height={32} style={{ color: 'var(--gold)', opacity: 0.7 }} />
+                    <p style={{ margin: '8px 0 2px', fontWeight: 700, color: 'var(--ink)', fontSize: 13 }}>Add additional files</p>
+                    <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>PDF, Word, JPEG, PNG</p>
+                    <input id="saddad-extra-file-input" type="file" multiple accept=".pdf,.docx,.doc,.jpg,.jpeg,.png"
+                      style={{ display: 'none' }} onChange={handleExtraFileInput} />
+                  </div>
+                )}
+              </div>
 
               {stepError && <p style={{ color: 'var(--red)', fontSize: 13.5, marginTop: 16 }}>⚠ {stepError}</p>}
               <div style={{ display: 'flex', gap: 16, marginTop: 28 }}>
@@ -749,17 +826,37 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
                     <label style={{ fontSize: 13, fontWeight: 800, color: 'var(--muted)' }}>Total Arrears Amount</label>
                     <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--red)' }}>AED {(Number(form.arrears_amount) || loanDetails.arrears_amount).toLocaleString()}</div>
                   </div>
+                  {requestDescription.trim() && (
+                    <div style={{ borderTop: '1px solid var(--line)', paddingTop: 12 }}>
+                      <label style={{ fontSize: 13, fontWeight: 800, color: 'var(--muted)' }}>Your Request</label>
+                      <div style={{ fontSize: 14, color: 'var(--body)', whiteSpace: 'pre-wrap' }}>{requestDescription}</div>
+                    </div>
+                  )}
                   <div style={{ borderTop: '1px solid var(--line)', paddingTop: 12 }}>
                     <label style={{ fontSize: 13, fontWeight: 800, color: 'var(--muted)' }}>Uploaded Document</label>
                     <div style={{ fontSize: 15, fontWeight: 600, color: files.length > 0 ? 'var(--green)' : 'var(--muted)' }}>
                       {files.length > 0 ? `✓ ${files[0].name}` : (docRequired ? 'Required — not uploaded' : 'Not uploaded (optional)')}
                     </div>
+                    {primaryDescription.trim() && <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>{primaryDescription}</div>}
                   </div>
                   {supportingFiles.length > 0 && (
                     <div style={{ borderTop: '1px solid var(--line)', paddingTop: 12 }}>
                       <label style={{ fontSize: 13, fontWeight: 800, color: 'var(--muted)' }}>Uploaded Supporting Document</label>
                       <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--green)' }}>
                         ✓ {supportingFiles[0].name}
+                      </div>
+                      {supportingDescription.trim() && <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>{supportingDescription}</div>}
+                    </div>
+                  )}
+                  {additionalDocs.length > 0 && (
+                    <div style={{ borderTop: '1px solid var(--line)', paddingTop: 12 }}>
+                      <label style={{ fontSize: 13, fontWeight: 800, color: 'var(--muted)' }}>Additional Documents</label>
+                      <div style={{ display: 'grid', gap: 4, marginTop: 6 }}>
+                        {additionalDocs.map((d, i) => (
+                          <div key={i} style={{ fontSize: 13.5, color: 'var(--ink)' }}>
+                            📎 {d.file.name}{d.description ? <span style={{ color: 'var(--muted)', fontWeight: 400 }}> — {d.description}</span> : null}
+                          </div>
+                        ))}
                       </div>
                     </div>
                   )}
