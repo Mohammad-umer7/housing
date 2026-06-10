@@ -344,8 +344,9 @@ a:hover { color: var(--gold-dark); }
   color: var(--muted); font-size: 14px; flex-wrap: wrap;
 }
 .foot-social { display: flex; align-items: center; gap: 16px; }
-.foot-social svg { width: 22px; height: 22px; color: var(--gold-dark); cursor: pointer; }
-.foot-social svg:hover { color: var(--gold); }
+.foot-social a { display: inline-flex; align-items: center; color: var(--gold-dark); }
+.foot-social svg { width: 22px; height: 22px; color: currentColor; cursor: pointer; }
+.foot-social a:hover { color: var(--gold); }
 
 /* ============================================================
    PROCESSING PIPELINE (VERTICAL STATUS STEPPER)

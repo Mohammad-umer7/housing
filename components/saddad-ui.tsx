@@ -17,6 +17,7 @@ export const Ico = {
   logout: (p: SVGP) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5M21 12H9" /></svg>,
   user: (p: SVGP) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...p}><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 4-6 8-6s8 2 8 6" /></svg>,
   access: (p: SVGP) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...p}><circle cx="12" cy="4" r="1.6" /><path d="M5 8h14M12 8v6M12 14l-3 6M12 14l3 6" /></svg>,
+  gear: (p: SVGP) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.05.05a2 2 0 0 1-2.83 2.83l-.05-.05A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.38 1.08V21a2 2 0 0 1-4 0v-.08A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.05.05a2 2 0 0 1-2.83-2.83l.05-.05A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.08-.38H3a2 2 0 0 1 0-4h.08A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.05-.05a2 2 0 0 1 2.83-2.83l.05.05A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .38-1.08V3a2 2 0 0 1 4 0v.08A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.05-.05a2 2 0 0 1 2.83 2.83l-.05.05A1.7 1.7 0 0 0 19.4 9c.22.38.58.74 1 1 .32.18.68.28 1.08.28H21a2 2 0 0 1 0 4h-.08A1.7 1.7 0 0 0 19.4 15z" /></svg>,
   globe: (p: SVGP) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...p}><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.5 2.5 2.5 15 0 18M12 3c-2.5 2.5-2.5 15 0 18" /></svg>,
   search: (p: SVGP) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" {...p}><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>,
   speaker: (p: SVGP) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" {...p}><path d="M4 9v6h4l5 4V5L8 9H4z" /><path d="M16 9a3 3 0 0 1 0 6" /></svg>,
@@ -96,7 +97,7 @@ export function GovHeader({
             )
           })}
           <button className={'navlink nav-spacer' + (active === 'settings' ? ' active' : '')} onClick={() => onNav('settings')}>
-            <Ico.access /> {t('Settings', 'الإعدادات')}
+            <Ico.gear /> {t('Settings', 'الإعدادات')}
           </button>
           <button className="navlink nav-logout" onClick={() => onNav('login')}>
             <Ico.logout /> {t('Logout', 'تسجيل الخروج')}
@@ -108,6 +109,14 @@ export function GovHeader({
 }
 
 export function GovFooter() {
+  const socials = [
+    { label: 'Facebook', href: 'https://www.facebook.com/moeiuae/', icon: Ico.fb },
+    { label: 'Instagram', href: 'https://www.instagram.com/moeiuae/?hl=en', icon: Ico.ig },
+    { label: 'LinkedIn', href: 'https://www.linkedin.com/company/moeiuae/?originalSubdomain=ae', icon: Ico.li },
+    { label: 'X', href: 'https://twitter.com/MOEIUAE', icon: Ico.x },
+    { label: 'YouTube', href: 'https://www.youtube.com/@MOEIUAE', icon: Ico.yt },
+  ]
+
   return (
     <footer className="gov-foot">
       <div className="foot-bar">
@@ -115,7 +124,14 @@ export function GovFooter() {
           <span>© 2026 Ministry of Energy and Infrastructure. All rights reserved.</span>
           <div className="foot-social">
             <span className="muted" style={{ fontWeight: 600 }}>Follow us on:</span>
-            <Ico.fb /><Ico.ig /><Ico.li /><Ico.x /><Ico.yt />
+            {socials.map((social) => {
+              const Icon = social.icon
+              return (
+                <a key={social.label} href={social.href} target="_blank" rel="noopener noreferrer" aria-label={`MOEI ${social.label}`}>
+                  <Icon />
+                </a>
+              )
+            })}
           </div>
         </div>
       </div>
