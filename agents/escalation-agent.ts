@@ -45,6 +45,15 @@ export async function escalationNode(state: SaddadStateType): Promise<SaddadNode
       reasoning: aiRationale,
       documentsComplete: applicant.document_valid !== false,
     })
+    // Two-document round-trip: persist whether the salary cert was validated and which
+    // supporting document is still owed, so a "Submit Documents" resubmission only needs
+    // that doc. Cleared (pendingSupportingDoc=null) once both documents are valid.
+    const caseStudyWithDocs = {
+      ...caseStudy,
+      pendingSupportingDoc: docResult?.pendingSupportingDoc ?? null,
+      salaryCertValidated: docResult?.salaryCertValidated ?? false,
+      validatedSalary: docResult?.validatedSalary ?? null,
+    }
 
     await executeDatabaseTool('update_case', {
       caseNumber,
@@ -69,6 +78,8 @@ export async function escalationNode(state: SaddadStateType): Promise<SaddadNode
         fairness_note: fairnessResult.fairnessNote,
         loan_bank_name: String(applicant.loan_bank_name || ''),
         loan_account_number: String(applicant.loan_account_number || ''),
+        account_number: applicant.account_number ? String(applicant.account_number) : null,
+        iban: applicant.iban ? String(applicant.iban) : null,
         total_loan_amount: Number(applicant.total_loan_amount) || null,
         remaining_loan_balance: financials.remaining_loan_balance || null,
         current_installment: Number(applicant.current_installment) || null,
@@ -76,7 +87,7 @@ export async function escalationNode(state: SaddadStateType): Promise<SaddadNode
         total_new_monthly_payment: isApproved ? financials.total_new_monthly : null,
         recovery_guidance: recoveryPlan?.needed ? stripNul(recoveryPlan.summary) : null,
         recovery_guidance_ar: recoveryPlan?.needed ? stripNul(recoveryPlan.summaryAr) : null,
-        case_study: caseStudy,
+        case_study: caseStudyWithDocs,
         verification_report: docResult?.verificationReport ?? null,
         // UAE PASS social signal — stored for the officer view. `priority_escalation`
         // is the fast-track flag: TRUE only when a PRIORITY beneficiary's case was

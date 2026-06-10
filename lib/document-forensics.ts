@@ -260,6 +260,18 @@ export function extractEmiratesId(pdfText: string): string | null {
   return m ? m[0].replace(/(\d{3})-?(\d{4})-?(\d{7})-?(\d)/, '$1-$2-$3-$4') : null
 }
 
+// ── Bank account + IBAN extraction (for the account cross-check) ───────────────────
+// UAE IBAN is "AE" + 2 check digits + 19 digits (often printed in 4-digit groups).
+export function extractIban(pdfText: string): string | null {
+  const m = (pdfText || '').match(/AE\d{2}(?:[ ]?\d){19}/i)
+  return m ? m[0].replace(/\s+/g, '').toUpperCase() : null
+}
+// A labelled account number, e.g. "Account Number: 049-2019482-01".
+export function extractAccountNumber(pdfText: string): string | null {
+  const m = (pdfText || '').match(/account\s*(?:number|no\.?|#)?\s*[:\-]?\s*([0-9][0-9\- ]{6,30})/i)
+  return m ? m[1].trim().replace(/[ ]+$/, '') : null
+}
+
 const norm = (s: string | null | undefined) =>
   String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
 
@@ -276,6 +288,8 @@ export type ForensicInputs = {
     name: string | null
     employer: string | null
     emiratesId: string | null
+    iban?: string | null
+    account?: string | null
   }
   // null ⇒ the signal was not available (e.g. scanned PDF with no text layer) → the
   // check is "na", never penalised.
@@ -437,6 +451,31 @@ export function buildVerificationReport(input: ForensicInputs): VerificationRepo
     weight: 6,
   })
 
+  // 4b: bank account / IBAN cross-check against the beneficiary's record. A divergence is
+  // a strong fraud signal (the document belongs to a different account) → mismatch → officer.
+  const recIban = norm(record?.iban)
+  const recAcct = norm(record?.account_number)
+  const docIban = norm(extracted.iban)
+  const docAcct = norm(extracted.account)
+  const accountApplicable = !!record && !wrongType && (!!recIban || !!recAcct) && (!!docIban || !!docAcct)
+  const accountMismatch = accountApplicable && (
+    (!!docIban && !!recIban && docIban !== recIban) ||
+    (!!docAcct && !!recAcct && docAcct !== recAcct)
+  )
+  checks.push({
+    id: 'account_match',
+    label: 'Bank account / IBAN matches the record',
+    status: !accountApplicable ? 'na' : accountMismatch ? 'fail' : 'pass',
+    detail: wrongType
+      ? 'Not evaluated — the file is not the requested document type.'
+      : !accountApplicable
+      ? 'No account / IBAN available to cross-check.'
+      : accountMismatch
+      ? `The account / IBAN on the document (${extracted.iban || extracted.account}) does not match the beneficiary's record.`
+      : 'Account / IBAN on the document matches the record.',
+    weight: 12,
+  })
+
   // 5: internal arithmetic (salary certificates only).
   const arithmeticFail =
     profile.salaryBearing && !wrongType && !!arithmetic && arithmetic.hasFigures && !arithmetic.consistent
@@ -501,7 +540,7 @@ export function buildVerificationReport(input: ForensicInputs): VerificationRepo
   let verdict: VerificationVerdict
   if (visionSuspicious) verdict = 'suspicious'
   else if (wrongType) verdict = 'invalid'
-  else if (salaryMismatch || eidMatch === false) verdict = 'mismatch'
+  else if (salaryMismatch || eidMatch === false || accountMismatch) verdict = 'mismatch'
   else if (profile.salaryBearing && !recordValid) verdict = 'unverifiable'
   else if (arithmeticFail) verdict = 'tampered'
   else verdict = 'verified'

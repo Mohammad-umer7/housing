@@ -97,7 +97,7 @@ export default function AdminFeedbackPage() {
 
       {/* Summary cards */}
       {!loading && !loadError && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.4fr', gap: 18, marginBottom: 22 }}>
+        <div className="resp-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.4fr', gap: 18, marginBottom: 22 }}>
           <div className="card card-pad">
             <div className="muted" style={{ fontSize: 12, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase' }}>{t('Average Rating')}</div>
             <div style={{ fontSize: 42, fontWeight: 800, color: 'var(--ink)', lineHeight: 1.1, marginTop: 6 }}>

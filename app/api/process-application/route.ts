@@ -14,7 +14,7 @@ import { baseApplicationId } from '@/lib/integrations/source-systems'
 import { requireAuth, checkRateLimit } from '@/lib/middleware/auth'
 import { successResponse, errorResponse } from '@/lib/api-response'
 import { extractTextFromPDF, extractDocumentFields } from '@/lib/pdf-extractor'
-import { checkStructure, checkArithmetic, extractEmiratesId } from '@/lib/document-forensics'
+import { checkStructure, checkArithmetic, extractEmiratesId, extractIban, extractAccountNumber } from '@/lib/document-forensics'
 import { classifyRequestCircumstances, determineRequiredDocuments } from '@/governance/housing-arrears'
 
 const sanitize = (s: unknown) => String(s ?? '').replace(/<[^>]*>/g, '').trim()
@@ -59,7 +59,9 @@ export async function POST(req: NextRequest) {
         auto_dda: formData.get('auto_dda'),
         documents: formData.get('documents') ? [formData.get('documents')] : [],
       }
-      const fileEntry = formData.get('salaryCertificate')
+      // One file per submission — either the salary cert (primary stage) or the
+      // reason-specific supporting document (round-trip). Read whichever is present.
+      const fileEntry = formData.get('supportingDocument') ?? formData.get('salaryCertificate')
       if (fileEntry instanceof File && fileEntry.size > 0) salaryCertFile = fileEntry
     } else {
       body = await req.json()
@@ -84,11 +86,39 @@ export async function POST(req: NextRequest) {
     // (reschedule reason + free-text), the same classification the Document Agent
     // uses later. The expected type drives the doc-type-aware OCR field extraction
     // here and the Gemini authenticity review in the background agent.
-    const expectedDocType = determineRequiredDocuments({
-      reschedule_reason: String(body.reschedule_reason || 'other'),
-      ...classifyRequestCircumstances(String(body.reschedule_reason || 'other'), String(body.remarks ?? '')),
+    const reasonStr = String(body.reschedule_reason || 'other')
+    const circ = classifyRequestCircumstances(reasonStr, String(body.remarks ?? ''))
+    const required = determineRequiredDocuments({
+      reschedule_reason: reasonStr,
+      unemployment: circ.unemployment,
+      income_changed: circ.income_changed,
+      temporary_circumstance: circ.temporary_circumstance,
       hasIncomeRecord: true,
-    }).primaryType
+    })
+    // Two-document round-trip: if a prior case for this beneficiary already validated the
+    // salary cert and is still awaiting the reason-specific supporting document, THIS
+    // submission is the supporting-doc stage — expect that doc and carry the salary cert
+    // validation forward (server-authoritative; the client cannot force the stage).
+    let salaryCertAlreadyValidated = false
+    let carriedValidatedSalary: number | null = null
+    if (emirates_id && required.supporting) {
+      const priorCases = await getCasesByEmiratesId(emirates_id)
+      // Only the MOST RECENT case reflects the current state (an older, since-resolved case
+      // must not re-trigger the supporting stage).
+      const mostRecent = priorCases
+        .slice()
+        .sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')))[0]
+      const cs =
+        mostRecent?.case_study && typeof mostRecent.case_study === 'object'
+          ? (mostRecent.case_study as Record<string, unknown>)
+          : null
+      if (cs?.salaryCertValidated === true && cs?.pendingSupportingDoc) {
+        salaryCertAlreadyValidated = true
+        carriedValidatedSalary = Number(cs.validatedSalary) || null
+      }
+    }
+    const expectedDocType =
+      salaryCertAlreadyValidated && required.supporting ? required.supporting.type : required.primary.type
 
     // Real PDF extraction + document forensics
     let extractedPdfText = ''
@@ -96,6 +126,8 @@ export async function POST(req: NextRequest) {
     let pdfStructure = null
     let pdfArithmetic = null
     let pdfExtractedEid: string | null = null
+    let pdfExtractedIban: string | null = null
+    let pdfExtractedAccount: string | null = null
     let pdfBase64: string | null = null
     const documentUploaded = !!salaryCertFile
 
@@ -116,6 +148,8 @@ export async function POST(req: NextRequest) {
       pdfStructure = extractedPdfText.length >= 40 ? checkStructure(extractedPdfText, expectedDocType) : null
       pdfArithmetic = checkArithmetic(extractedPdfText)
       pdfExtractedEid = extractEmiratesId(extractedPdfText)
+      pdfExtractedIban = extractIban(extractedPdfText)
+      pdfExtractedAccount = extractAccountNumber(extractedPdfText)
       if (pdfBuf.byteLength <= 4 * 1024 * 1024) pdfBase64 = pdfBuf.toString('base64')
     }
 
@@ -151,7 +185,13 @@ export async function POST(req: NextRequest) {
       pdfStructure,
       pdfArithmetic,
       pdfExtractedEid,
+      pdfExtractedIban,
+      pdfExtractedAccount,
       pdfBase64,
+      // Two-document round-trip — when set, the Document Agent trusts the prior salary-cert
+      // validation and only validates the supporting document uploaded in this submission.
+      salaryCertAlreadyValidated,
+      validatedSalary: carriedValidatedSalary,
       documents: documentUploaded
         ? [expectedDocType]
         : (Array.isArray(body.documents) ? body.documents : [expectedDocType]),

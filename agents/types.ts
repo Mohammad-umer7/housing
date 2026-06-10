@@ -44,6 +44,15 @@ export type DocResult = {
   verificationReport: VerificationReport | null
   // The specific document(s) this case needs — surfaced when something is missing.
   requiredDocuments: string[]
+  // ── Two-document round-trip ──────────────────────────────────────────────────
+  // Which stage this submission validated: the mandatory primary doc, or the
+  // reason-specific supporting doc requested after the primary was accepted.
+  stage?: 'primary' | 'supporting'
+  // Set when the primary (salary cert) was accepted but a supporting document is still
+  // owed — carried into case_study so the resubmission only needs the supporting doc.
+  pendingSupportingDoc?: { type: string; label: string } | null
+  salaryCertValidated?: boolean
+  validatedSalary?: number | null
 }
 
 // ── Fairness ────────────────────────────────────────────────────────────────��─

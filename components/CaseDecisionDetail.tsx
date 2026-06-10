@@ -36,6 +36,7 @@ export type Decision = {
     periodRule: string
     recommendation: string
     reasoning: string
+    adminOverride?: { by: string; at: string; note: string; from: string; to: string } | null
   } | null
   verificationReport: {
     verdict: string
@@ -107,6 +108,16 @@ export function CaseDecisionDetail({
 
   return (
     <div className="stack-lg">
+      {d.caseStudy?.adminOverride && (
+        <div className="notice" style={{ borderColor: 'var(--gold-line)', background: 'var(--cream-soft)' }}>
+          <div className="ico"><Ico.shield /></div>
+          <div>
+            <h4>{t('Reviewed by a Ministry administrator')}</h4>
+            <p>{d.caseStudy.adminOverride.note}</p>
+          </div>
+        </div>
+      )}
+
       {d.consistencyScore !== null && (
         <div className="notice notice-blue">
           <div className="ico"><Ico.shield /></div>
@@ -128,7 +139,7 @@ export function CaseDecisionDetail({
                 <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--line)', paddingTop: 8, marginTop: 8, fontWeight: 800 }}><span>Total new monthly:</span><span style={{ color: 'var(--blue)' }}>AED {(d.totalNewMonthly ?? (d.monthlyPayment + d.currentInstallment)).toLocaleString()}</span></div>
               </>
             )}
-            <div style={{ borderTop: '1px solid var(--line)', paddingTop: 10, marginTop: 10, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, textAlign: 'center' }}>
+            <div className="resp-grid" style={{ borderTop: '1px solid var(--line)', paddingTop: 10, marginTop: 10, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, textAlign: 'center' }}>
               <div><div className="muted" style={{ fontSize: 11 }}>Duration</div><div style={{ fontWeight: 800, fontSize: 18 }}>{d.durationMonths} months</div></div>
               <div><div className="muted" style={{ fontSize: 11 }}>Ends</div><div style={{ fontWeight: 800 }}>{endDateStr ?? '—'}</div></div>
             </div>

@@ -58,6 +58,9 @@ export type CaseDecisionData = {
   // Loan fields
   loan_bank_name?: string
   loan_account_number?: string
+  // Beneficiary bank account + IBAN (snapshotted from the applicant record for display).
+  account_number?: string | null
+  iban?: string | null
   total_loan_amount?: number | null
   remaining_loan_balance?: number | null
   current_installment?: number | null
@@ -161,6 +164,8 @@ export async function upsertCaseDecision(caseNumber: string, data: CaseDecisionD
   if (data.fairness_note !== undefined) extData.fairness_note = data.fairness_note
   if (data.loan_bank_name !== undefined) extData.loan_bank_name = data.loan_bank_name
   if (data.loan_account_number !== undefined) extData.loan_account_number = data.loan_account_number
+  if (data.account_number !== undefined) extData.account_number = data.account_number
+  if (data.iban !== undefined) extData.iban = data.iban
   if (data.total_loan_amount !== undefined) extData.total_loan_amount = data.total_loan_amount
   if (data.remaining_loan_balance !== undefined) extData.remaining_loan_balance = data.remaining_loan_balance
   if (data.current_installment !== undefined) extData.current_installment = data.current_installment

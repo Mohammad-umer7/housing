@@ -74,7 +74,7 @@ export default function AccessibilitySettings() {
       <h2 style={{ fontSize: 26, fontWeight: 800, color: 'var(--ink-navy)', marginBottom: 18 }}>{t('Accessibilities', 'إمكانية الوصول')}</h2>
 
       {/* 2×2 cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div className="resp-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <div style={cardStyle} onClick={() => update({ fontScale: cycle(settings.fontScale) })} role="button" tabIndex={0}>
           <div style={cardTitle}>{t('Font size', 'حجم الخط')}</div>
           <p style={{ color: 'var(--body)', fontSize: 14, lineHeight: 1.5 }}>{t('Here is an example of the font size that has been modified', 'هذا مثال على حجم الخط بعد التعديل')}</p>

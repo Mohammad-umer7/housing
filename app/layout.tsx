@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Plus_Jakarta_Sans, IBM_Plex_Sans_Arabic } from "next/font/google";
 import "./globals.css";
 import { TTSProvider } from "@/lib/tts";
@@ -24,6 +24,15 @@ const plexArabic = IBM_Plex_Sans_Arabic({
 export const metadata: Metadata = {
   title: "SADDAD | نظام إعادة جدولة متأخرات السكن",
   description: "SADDAD — AI-powered housing arrears rescheduling platform by the UAE Ministry of Energy and Infrastructure",
+};
+
+// Explicit mobile viewport so the layout scales correctly on phones (the design system in
+// globals.css is now fully responsive). viewportFit:'cover' lets us use the safe-area insets
+// on notched devices; the page stays user-scalable for accessibility (no maximumScale lock).
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

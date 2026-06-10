@@ -86,15 +86,28 @@ describe('applyGovernanceRules', () => {
     expect(result.rule_triggered).toContain('G-05')
   })
 
-  test('priority social status is NOT a governance rule — never escalates on its own', () => {
-    // G-06 (priority group) was removed: a priority beneficiary (widow/orphan/senior/
-    // person of determination) is assessed exactly like anyone else. The rule set is
-    // G-00..G-05 only; priority only changes HANDLING after a genuine escalation.
+  test('rule set is G-00, G-06 (DDA), then G-01..G-05; priority social status is NOT a rule', () => {
+    // G-06 is the Direct Debit Authority rule (no DDA → reject, enrol with EDB). A priority
+    // beneficiary (widow/orphan/senior/person of determination) is still assessed like anyone
+    // else — there is no priority-group rule.
     const ids = GOVERNANCE_RULES.map(r => r.id)
-    expect(ids).not.toContain('G-06')
-    expect(ids).toEqual(['G-00', 'G-01', 'G-02', 'G-03', 'G-04', 'G-05'])
-    // A clean case approves — there is no priority input that could change that.
+    expect(ids).toEqual(['G-00', 'G-06', 'G-01', 'G-02', 'G-03', 'G-04', 'G-05'])
+    // A clean case (DDA present by default) approves.
     const result = applyGovernanceRules(baseArrears, baseSalary, false, baseFinancials, true)
+    expect(result.decision).toBe('APPROVED')
+  })
+
+  test('G-06: rejects (hard) when the beneficiary has no Direct Debit Authority (→ enrol with EDB)', () => {
+    const result = applyGovernanceRules(baseArrears, baseSalary, false, baseFinancials, true, { hasDda: false })
+    expect(result.decision).toBe('REJECTED')
+    expect(result.rule_triggered).toContain('G-06')
+    expect(result.reason).toMatch(/EDB|Emirates Development Bank|Direct Debit/i)
+    expect(toRecommendation(result.decision, result.rule_triggered)).toBe('Reject')
+  })
+
+  test('G-06: DDA present (default when omitted) does not block an approvable case', () => {
+    const result = applyGovernanceRules(baseArrears, baseSalary, false, baseFinancials, true, {})
+    expect(result.rule_triggered).not.toContain('G-06')
     expect(result.decision).toBe('APPROVED')
   })
 

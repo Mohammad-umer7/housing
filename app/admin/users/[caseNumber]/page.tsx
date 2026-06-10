@@ -134,7 +134,7 @@ export default function AdminUserDetailPage() {
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
+          <div className="resp-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
             <Section title={t('Identity & Contact', 'الهوية والتواصل')}>
               <Row label={t('Emirates ID')} value={a.emirates_id} mono />
               <Row label={t('Phone')} value={a.phone} mono />
@@ -164,7 +164,7 @@ export default function AdminUserDetailPage() {
 
             <Section title={`${t('Payment History')} · ${paidCount} ${t('paid')} · ${missedCount} ${t('missed')}`}>
               {a.payment_history && a.payment_history.length > 0 ? (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 7 }}>
+                <div className="resp-grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 7 }}>
                   {a.payment_history.map((p, i) => (
                     <div key={i} style={{
                       borderRadius: 'var(--r-sm)', padding: '8px 4px', textAlign: 'center',

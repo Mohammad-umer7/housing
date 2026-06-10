@@ -4,7 +4,7 @@ import { successResponse, errorResponse } from '@/lib/api-response'
 import { getApplicant } from '@/lib/integrations/source-systems'
 import { lookupUaePassProfile, SOCIAL_STATUS_LABELS } from '@/lib/integrations/uae-pass'
 import { classifyRequestCircumstances, determineRequiredDocuments } from '@/governance/housing-arrears'
-import { getCaseByCaseNumber, getResubmissionGate } from '@/lib/data-layer'
+import { getCaseByCaseNumber, getResubmissionGate, getCasesByEmiratesId } from '@/lib/data-layer'
 
 // GET /api/v1/cases/lookup?caseNumber=X
 // Returns applicant loan details for pre-population in the submission form.
@@ -65,6 +65,27 @@ export async function GET(req: NextRequest) {
       hasIncomeRecord: Number(applicant.monthly_salary) > 0,
     })
 
+    // Two-document round-trip stage: if the beneficiary's most recent case validated the
+    // salary cert and is still awaiting a supporting document, the form should ask for that
+    // supporting doc now (the salary cert is trusted forward); otherwise ask for the primary.
+    const emiratesIdForCases = String(uaePass?.emirates_id ?? applicant.emirates_id ?? '')
+    let supportingStage = false
+    if (emiratesIdForCases && required.supporting) {
+      const beneficiaryCases = await getCasesByEmiratesId(emiratesIdForCases)
+      const mostRecentCase = beneficiaryCases
+        .slice()
+        .sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')))[0]
+      const cs =
+        mostRecentCase?.case_study && typeof mostRecentCase.case_study === 'object'
+          ? (mostRecentCase.case_study as Record<string, unknown>)
+          : null
+      supportingStage = cs?.salaryCertValidated === true && !!cs?.pendingSupportingDoc
+    }
+    const documentRequest =
+      supportingStage && required.supporting
+        ? { stage: 'supporting' as const, type: required.supporting.type, label: required.supporting.label }
+        : { stage: 'primary' as const, type: required.primary.type, label: required.primary.label }
+
     return NextResponse.json(
       successResponse({
         case_number: applicant.case_number,
@@ -105,11 +126,18 @@ export async function GET(req: NextRequest) {
         priorRecommendation: priorRecommendation || null,
         // Whether a NEW submission under this App ID is currently blocked (and why).
         resubmission,
-        // Case-aware document requirement for the upload label / validation.
+        // Case-aware document requirement for the upload label / validation. `label` is the
+        // document to ask for RIGHT NOW (primary by default; the supporting doc on a
+        // round-trip resubmit). `primary`/`supporting` expose the full two-document model.
         requiredDocuments: {
-          requiresUpload: required.requiresUpload,
-          label: required.labels[0] ?? 'A recent salary certificate (issued within the last 30 days)',
-          primaryType: required.primaryType,
+          requiresUpload: true,
+          label: documentRequest.label,
+          primaryType: required.primary.type,
+          stage: documentRequest.stage,
+          primary: { type: required.primary.type, label: required.primary.label },
+          supporting: required.supporting
+            ? { type: required.supporting.type, label: required.supporting.label }
+            : null,
         },
       })
     )

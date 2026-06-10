@@ -152,7 +152,7 @@ export default function AdminOverviewPage() {
       </div>
 
       {/* Charts */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 18, marginBottom: 22 }}>
+      <div className="resp-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 18, marginBottom: 22 }}>
         <div className="card card-pad">
           <h3 style={{ fontSize: 19, marginBottom: 14 }}>{t('Cases by status', 'الحالات حسب الوضع')}</h3>
           <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
@@ -174,7 +174,7 @@ export default function AdminOverviewPage() {
       </div>
 
       {/* Recent cases + Priority queue */}
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 18 }}>
+      <div className="resp-grid" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 18 }}>
         <div className="table-card">
           <div className="table-hd">
             <h3 style={{ fontSize: 19 }}>{t('Recent cases', 'أحدث الحالات')}</h3>

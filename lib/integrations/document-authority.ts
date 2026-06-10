@@ -24,6 +24,10 @@ export type AuthorityRecord = {
   gross_salary: number
   issue_date: string
   status: string
+  // Beneficiary's bank account + IBAN on record — cross-checked against the account/IBAN
+  // printed on an uploaded document (a divergence is a fraud signal → officer review).
+  account_number?: string | null
+  iban?: string | null
 }
 
 // Look up the authoritative salary record for a beneficiary by Emirates ID (the

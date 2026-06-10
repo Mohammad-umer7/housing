@@ -1,4 +1,4 @@
-import { buildVerificationReport, type VisionAssessment } from '../lib/document-forensics'
+import { buildVerificationReport, extractIban, extractAccountNumber, type VisionAssessment } from '../lib/document-forensics'
 import type { AuthorityRecord } from '../lib/integrations/document-authority'
 import { determineRequiredDocuments } from '../governance/housing-arrears'
 import { assessDocumentAuthenticity, isGeminiConfigured } from '../lib/llm/gemini'
@@ -88,37 +88,103 @@ describe('Vision-LLM authenticity layer', () => {
   })
 })
 
-describe('Smart required documents', () => {
-  it('unemployment → official non-work / termination letter, upload required', () => {
+describe('Smart required documents (two-document model)', () => {
+  it('job loss / unemployment → non-work letter REPLACES the salary cert (no supporting doc)', () => {
     const r = determineRequiredDocuments({ unemployment: true, hasIncomeRecord: true })
-    expect(r.primaryType).toBe('non_work_letter')
+    expect(r.primary.type).toBe('non_work_letter')
+    expect(r.supporting).toBeNull()
     expect(r.requiresUpload).toBe(true)
-    expect(r.labels[0]).toMatch(/non-work|termination/i)
+    expect(r.primary.label).toMatch(/non-work|termination/i)
   })
 
-  it('business failure → income / bank statement, upload required', () => {
+  it('business failure → salary cert (primary) + bank/income statement (supporting)', () => {
     const r = determineRequiredDocuments({ reschedule_reason: 'business_failure', hasIncomeRecord: true })
-    expect(r.primaryType).toBe('income_statement')
-    expect(r.requiresUpload).toBe(true)
+    expect(r.primary.type).toBe('salary_certificate')
+    expect(r.supporting?.type).toBe('income_statement')
+    expect(r.supporting?.label).toMatch(/bank|income statement/i)
   })
 
-  it('income change → recent salary certificate, upload required', () => {
-    const r = determineRequiredDocuments({ income_changed: true, hasIncomeRecord: true })
-    expect(r.primaryType).toBe('salary_certificate')
-    expect(r.requiresUpload).toBe(true)
+  it('medical expenses → salary cert (primary) + medical / supporting document (supporting)', () => {
+    const r = determineRequiredDocuments({ reschedule_reason: 'medical_expenses', hasIncomeRecord: true })
+    expect(r.primary.type).toBe('salary_certificate')
+    expect(r.supporting?.type).toBe('supporting_document')
+    expect(r.supporting?.label).toMatch(/medical|supporting/i)
   })
 
-  it('stable employment WITH income on record → salary certificate still required', () => {
-    // Policy: a certificate is ALWAYS required so the forensic + vision check runs,
-    // even when on-record income could otherwise validate the case.
+  it('salary reduction / income change → salary cert (primary) + employer letter (supporting)', () => {
+    const r = determineRequiredDocuments({ reschedule_reason: 'salary_reduction', income_changed: true, hasIncomeRecord: true })
+    expect(r.primary.type).toBe('salary_certificate')
+    expect(r.supporting?.type).toBe('supporting_document')
+    expect(r.supporting?.label).toMatch(/employer letter|reduction/i)
+  })
+
+  it('other / stable employment → salary cert only (no supporting doc)', () => {
     const r = determineRequiredDocuments({ reschedule_reason: 'other', hasIncomeRecord: true })
-    expect(r.primaryType).toBe('salary_certificate')
+    expect(r.primary.type).toBe('salary_certificate')
+    expect(r.supporting).toBeNull()
     expect(r.requiresUpload).toBe(true)
   })
 
-  it('stable employment WITHOUT income on record → upload required', () => {
-    const r = determineRequiredDocuments({ reschedule_reason: 'other', hasIncomeRecord: false })
+  it('family circumstances → salary cert only (no supporting doc)', () => {
+    const r = determineRequiredDocuments({ reschedule_reason: 'family_circumstances', hasIncomeRecord: true })
+    expect(r.primary.type).toBe('salary_certificate')
+    expect(r.supporting).toBeNull()
+  })
+
+  it('back-compat: primaryType/labels/requiresUpload still point at the primary doc', () => {
+    const r = determineRequiredDocuments({ reschedule_reason: 'business_failure', hasIncomeRecord: true })
+    expect(r.primaryType).toBe('salary_certificate')
+    expect(r.labels[0]).toBe(r.primary.label)
     expect(r.requiresUpload).toBe(true)
+  })
+})
+
+describe('Account / IBAN cross-check', () => {
+  const recIban = 'AE070331234567890123456'
+  const structure = { docType: 'income_statement' as const, score: 1, found: 5, total: 5, looksLikeExpectedDoc: true }
+
+  it('matching IBAN on the document → account check passes', () => {
+    const r = buildVerificationReport({
+      expectedType: 'income_statement',
+      record: { ...record, iban: recIban },
+      declaredSalary: null,
+      extracted: { salary: null, name: record.employee_name, employer: null, emiratesId: record.emirates_id, iban: 'AE07 0331 2345 6789 0123 456' },
+      structure, arithmetic: null, vision: null,
+    })
+    expect(r.checks.find((c) => c.id === 'account_match')?.status).toBe('pass')
+    expect(r.verdict).toBe('verified')
+  })
+
+  it('a different IBAN on the document → mismatch (fraud signal → officer review)', () => {
+    const r = buildVerificationReport({
+      expectedType: 'income_statement',
+      record: { ...record, iban: recIban },
+      declaredSalary: null,
+      extracted: { salary: null, name: record.employee_name, employer: null, emiratesId: record.emirates_id, iban: 'AE999999999999999999999' },
+      structure, arithmetic: null, vision: null,
+    })
+    expect(r.checks.find((c) => c.id === 'account_match')?.status).toBe('fail')
+    expect(r.verdict).toBe('mismatch')
+  })
+
+  it('no account/IBAN to compare → check is N/A (never penalised)', () => {
+    const r = buildVerificationReport({
+      expectedType: 'income_statement',
+      record: { ...record, iban: recIban },
+      declaredSalary: null,
+      extracted: { salary: null, name: record.employee_name, employer: null, emiratesId: record.emirates_id },
+      structure, arithmetic: null, vision: null,
+    })
+    expect(r.checks.find((c) => c.id === 'account_match')?.status).toBe('na')
+  })
+})
+
+describe('IBAN / account extraction', () => {
+  it('extracts a UAE IBAN (with or without spaces)', () => {
+    expect(extractIban('Beneficiary IBAN: AE07 0331 2345 6789 0123 456 — thank you')).toBe('AE070331234567890123456')
+  })
+  it('extracts a labelled account number', () => {
+    expect(extractAccountNumber('Account Number: 049-2019482-01')).toBe('049-2019482-01')
   })
 })
 

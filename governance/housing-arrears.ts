@@ -142,6 +142,7 @@ export function computePerMemberIncome(salary: number, familySize: number): numb
 // The fields each governance rule evaluates. Assembled in applyGovernanceRules.
 export type RuleData = {
   hasActiveApplication: boolean
+  hasDda: boolean
   documentsValid: boolean
   documentFresh: boolean
   twentyPercentRulePass: boolean
@@ -159,6 +160,14 @@ export const GOVERNANCE_RULES: GovernanceRule<RuleData>[] = [
     check: (data: RuleData) => !data.hasActiveApplication,
     failOutcome: 'REJECT', // a genuine denial — surfaced to the citizen as "Rejected"
     failReason: 'An active rescheduling application already exists for this beneficiary — duplicate request automatically rejected',
+  },
+  {
+    id: 'G-06',
+    name: 'Direct Debit Authority Required',
+    description: 'The beneficiary must have an active Direct Debit Authority (DDA) so the rescheduled installment can be auto-collected. No DDA → rejected with guidance to enrol with Emirates Development Bank (EDB).',
+    check: (data: RuleData) => data.hasDda,
+    failOutcome: 'REJECT', // a genuine denial — surfaced to the citizen as "Reject" (enrol DDA, then re-apply)
+    failReason: 'No active Direct Debit Authority (DDA) on file — please enrol for Direct Debit with Emirates Development Bank (EDB), then re-apply.',
   },
   {
     id: 'G-01',
@@ -218,7 +227,8 @@ export function toRecommendation(decision: GovernanceDecision, ruleTriggered?: s
   if (decision === 'APPROVED') return 'Approve'
   if (decision === 'ESCALATED') return 'Refer to Employee'
   const ruleId = ruleTriggered ? (ruleTriggered.match(/G-\d+/)?.[0] ?? '') : ''
-  if (ruleId === 'G-00') return 'Reject' // genuine denial (duplicate active application)
+  // Genuine denials: duplicate active application (G-00) and no Direct Debit Authority (G-06).
+  if (ruleId === 'G-00' || ruleId === 'G-06') return 'Reject'
   return 'Request Documents' // G-01 (and any other recoverable REJECT) ⇒ ask for documents
 }
 
@@ -258,10 +268,30 @@ export function classifyRequestCircumstances(reason: string, freeText = ''): Req
 // the beneficiary's situation, read from the structured reason + free-text.
 export type DocumentType = 'salary_certificate' | 'non_work_letter' | 'income_statement' | 'supporting_document'
 
+// A single citizen-facing document ask (the type SADDAD validates against + the label shown).
+export type DocSpec = { type: DocumentType; label: string }
+
+// Two-document model: a mandatory PRIMARY document (always the salary certificate, except
+// Job Loss where the non-work letter replaces it) and, for certain reasons, a reason-specific
+// SUPPORTING document requested via a Request-Documents round-trip AFTER the primary is valid.
 export type RequiredDocuments = {
+  primary: DocSpec
+  supporting: DocSpec | null
+  // ── Back-compat (point at the PRIMARY doc) — kept so existing callers keep working. ──
   labels: string[]        // citizen-facing, specific asks
-  requiresUpload: boolean // true when an uploaded document is needed beyond on-record income
+  requiresUpload: boolean // the primary document is always required
   primaryType: DocumentType
+}
+
+const DOC_LABELS: Record<DocumentType, string> = {
+  salary_certificate: 'A recent salary certificate (issued within the last 30 days)',
+  non_work_letter: 'An official non-work / termination letter from your employer or the labour authority (proof you no longer earn a salary)',
+  income_statement: 'A recent bank statement or income statement covering the last 3 months',
+  supporting_document: 'A supporting document for your circumstance',
+}
+
+function withCompat(primary: DocSpec, supporting: DocSpec | null): RequiredDocuments {
+  return { primary, supporting, labels: [primary.label], requiresUpload: true, primaryType: primary.type }
 }
 
 export function determineRequiredDocuments(input: {
@@ -272,43 +302,35 @@ export function determineRequiredDocuments(input: {
   hasIncomeRecord?: boolean
 }): RequiredDocuments {
   const reason = String(input.reschedule_reason || 'other')
+
+  // Job loss / unemployment: the non-work letter REPLACES the salary certificate (an
+  // unemployed beneficiary has no salary to certify). Single mandatory document.
   if (input.unemployment || reason === 'job_loss') {
-    return {
-      primaryType: 'non_work_letter',
-      requiresUpload: true,
-      labels: ['An official non-work / termination letter from your employer or the labour authority (proof you no longer earn a salary)'],
-    }
+    return withCompat({ type: 'non_work_letter', label: DOC_LABELS.non_work_letter }, null)
   }
+
+  // Everyone else: a recent salary certificate is the MANDATORY primary document so the
+  // forensic + vision authenticity check always runs (the on-record Programme income is
+  // still cross-checked against it during verification).
+  const salaryCert: DocSpec = { type: 'salary_certificate', label: DOC_LABELS.salary_certificate }
+
+  // Reason-specific SUPPORTING document (requested only after the salary cert is valid).
+  let supporting: DocSpec | null = null
   if (reason === 'business_failure') {
-    return {
-      primaryType: 'income_statement',
-      requiresUpload: true,
-      labels: ['A recent bank statement or income statement covering the last 3 months'],
+    supporting = { type: 'income_statement', label: DOC_LABELS.income_statement }
+  } else if (input.temporary_circumstance || reason === 'medical_expenses') {
+    supporting = {
+      type: 'supporting_document',
+      label: 'A medical report or official supporting document for your circumstance (e.g. a hospital report or an official assignment / secondment letter)',
+    }
+  } else if (input.income_changed || reason === 'salary_reduction') {
+    supporting = {
+      type: 'supporting_document',
+      label: 'An official employer letter confirming your salary reduction',
     }
   }
-  if (input.temporary_circumstance) {
-    return {
-      primaryType: 'supporting_document',
-      requiresUpload: true,
-      labels: ['A supporting document for your circumstance (e.g. a medical report or an official assignment / secondment letter)'],
-    }
-  }
-  if (input.income_changed || reason === 'salary_reduction') {
-    return {
-      primaryType: 'salary_certificate',
-      requiresUpload: true,
-      labels: ['A recent salary certificate (issued within the last 30 days) showing your current reduced salary'],
-    }
-  }
-  // Stable employment: a recent salary certificate is ALWAYS required so the
-  // forensic + vision authenticity check always runs (even though the on-record
-  // Programme income could otherwise validate it). The on-record salary is still
-  // cross-checked against the uploaded certificate during verification.
-  return {
-    primaryType: 'salary_certificate',
-    requiresUpload: true,
-    labels: ['A recent salary certificate (issued within the last 30 days)'],
-  }
+  // Stable employment / family circumstances / other → salary certificate only.
+  return withCompat(salaryCert, supporting)
 }
 
 // Reschedule-reason stability weighting (higher = more financially destabilising).
@@ -547,6 +569,8 @@ export function analyzeFinancials(
 export type GovernanceOptions = {
   documentFresh?: boolean
   hasActiveApplication?: boolean
+  // Direct Debit Authority on file (defaults to true when omitted — back-compat).
+  hasDda?: boolean
   // Specific, citizen-facing reason for a G-01 documents request (e.g. "the uploaded
   // file is not a salary certificate" / "the details do not match your records").
   // Falls back to the generic missing-certificate message when not supplied.
@@ -563,6 +587,7 @@ export function applyGovernanceRules(
 ): GovernanceResult {
   const data: RuleData = {
     hasActiveApplication: Boolean(opts.hasActiveApplication),
+    hasDda: opts.hasDda !== false, // default true when omitted (back-compat)
     documentsValid: document_valid,
     documentFresh: opts.documentFresh !== false,
     twentyPercentRulePass: financials.twenty_percent_rule_pass,
@@ -587,6 +612,8 @@ export function applyGovernanceRules(
   let reason = base.reason
   if (ruleId === 'G-00') {
     reason = 'An active rescheduling application already exists for this beneficiary. A duplicate request cannot be processed — please follow up on your existing application. Status: rejected (duplicate).'
+  } else if (ruleId === 'G-06') {
+    reason = 'You do not have an active Direct Debit Authority (DDA) for your housing loan. A DDA is required so the rescheduled installment can be collected automatically each month. Please enrol for Direct Debit with Emirates Development Bank (EDB), then submit your rescheduling request again. Status: rejected (no DDA).'
   } else if (ruleId === 'G-01') {
     reason = opts.documentRequestReason?.trim()
       ? opts.documentRequestReason.trim()
@@ -642,6 +669,7 @@ export const housingArrearsModule: ServiceModule = {
     )
     const ruleData: RuleData = {
       hasActiveApplication: Boolean(input.has_active_application),
+      hasDda: input.auto_dda !== false,
       documentsValid: input.document_valid !== false,
       documentFresh: input.document_fresh !== false,
       twentyPercentRulePass: analysis.twenty_percent_rule_pass,

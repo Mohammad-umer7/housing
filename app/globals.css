@@ -1889,3 +1889,168 @@ html.high-contrast *:focus-visible {
   gap: 12px;
   z-index: 10;
 }
+
+/* ============================================================
+   RESPONSIVE / MOBILE LAYER
+   Everything above targets the 1240px desktop design and is left
+   untouched. The rules below only take effect at the listed
+   breakpoints, so the desktop look cannot regress.
+   Breakpoints:  1024 tablet · 820 large phone · 560 phone · 400 small
+   ============================================================ */
+
+/* Guard against accidental sideways scroll. overflow-x:clip (NOT hidden) does
+   not create a scroll container, so the sticky .gov-nav keeps sticking. */
+html, body { overflow-x: clip; }
+img { max-width: 100%; height: auto; }
+
+/* Responsive helpers for the components that keep their multi-column grid via an
+   inline style: the inline grid stays for desktop, these collapse it on small
+   screens (hence !important, which is needed to beat the inline declaration). */
+@media (max-width: 820px) {
+  .resp-grid { grid-template-columns: 1fr !important; }
+  .resp-grid-4 { grid-template-columns: repeat(2, 1fr) !important; }
+}
+@media (max-width: 400px) {
+  .resp-grid-4 { grid-template-columns: 1fr !important; }
+}
+
+/* ---------- ≤1024px : tablets ---------- */
+@media (max-width: 1024px) {
+  .wrap, .wrap-narrow { padding-left: 22px; padding-right: 22px; }
+  .officer-wrap { padding-left: 22px; padding-right: 22px; }
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ---------- ≤820px : large phones / portrait tablets ---------- */
+@media (max-width: 820px) {
+  /* container horizontal padding */
+  .wrap, .wrap-narrow, .hero-inner, .gov-nav-inner, .gov-top-inner,
+  .officer-top-inner, .officer-wrap, .foot-cols, .foot-bar-inner, .crumbs {
+    padding-left: 20px; padding-right: 20px;
+  }
+  .card-pad { padding: 20px; }
+  .card-hd { padding: 16px 20px; }
+
+  /* citizen service nav — horizontal scroll, tabs never squashed */
+  .gov-nav-inner {
+    overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  }
+  .gov-nav-inner::-webkit-scrollbar { display: none; }
+  .navlink { flex: none; padding: 14px 14px; font-size: 14px; }
+
+  /* officer / admin header */
+  .gov-top-inner { flex-wrap: wrap; gap: 14px; }
+  .officer-top-inner { flex-wrap: wrap; gap: 12px; padding-top: 14px; padding-bottom: 14px; }
+  .officer-brand { font-size: 17px; }
+  .officer-links {
+    margin-left: 0; width: 100%; gap: 16px; padding-bottom: 2px;
+    overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  }
+  .officer-links::-webkit-scrollbar { display: none; }
+  .officer-links a, .officer-links button { white-space: nowrap; flex: none; }
+
+  /* hero */
+  .hero-inner { padding: 36px 20px; gap: 22px; }
+  .hero .sub { font-size: 16px; }
+  .hero-stats { gap: 18px; }
+  .hero-stat + .hero-stat { border-left: 0; padding-left: 0; }
+
+  /* data tables — scroll horizontally inside their card instead of clipping */
+  .table-card { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.cases { min-width: 640px; }
+  table.cases th, table.cases td { padding: 14px 16px !important; }
+  .table-hd { padding: 18px 20px; }
+
+  /* dashboard widgets */
+  .proc-head { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .proc-count { text-align: left; }
+  .queue-monitor .row { gap: 28px; flex-wrap: wrap; }
+  .impact { flex-direction: column; align-items: flex-start; gap: 16px; padding: 22px; }
+  .impact .rate { text-align: left; }
+
+  /* officer escalation cards */
+  .esc-top { flex-direction: column; gap: 12px; padding: 20px; }
+  .esc-fin { text-align: left; }
+  .esc-actions { padding: 16px 20px; }
+  .analysis-col { padding: 20px; }
+
+  /* feedback */
+  .fb-summary { flex-direction: column; align-items: flex-start; gap: 20px; padding: 24px; }
+  .fb-divider { display: none; }
+  .fb-card { padding: 20px; }
+  .fb-card .top { flex-wrap: wrap; gap: 8px; }
+
+  /* footer */
+  .foot-cols { grid-template-columns: repeat(2, 1fr); gap: 28px; padding: 40px 20px 28px; }
+  .foot-contact, .tawasul, .tawasul .lines { align-items: flex-start; text-align: left; }
+  .tawasul .ln { justify-content: flex-start; }
+
+  /* assistant chat panel → nearly full-screen */
+  .assistant-panel {
+    inset-inline: 10px; width: auto; max-width: none;
+    height: 78vh; bottom: 10px;
+  }
+}
+
+/* ---------- ≤560px : phones ---------- */
+@media (max-width: 560px) {
+  .wrap, .wrap-narrow, .hero-inner, .gov-nav-inner, .gov-top-inner,
+  .officer-top-inner, .officer-wrap, .foot-cols, .foot-bar-inner, .crumbs {
+    padding-left: 16px; padding-right: 16px;
+  }
+  .officer-wrap { padding-top: 24px; padding-bottom: 48px; }
+
+  /* drop the long Arabic sub-text in the admin/officer tag so the brand fits */
+  .internal-tag .ar { display: none; }
+  .internal-tag { font-size: 11.5px; padding: 5px 10px; }
+
+  /* hero */
+  .hero-inner { padding: 28px 16px; }
+  .hero .sub { font-size: 15px; }
+  .hero .ar-sub { font-size: 14px; }
+
+  /* typography down-scale */
+  .section-title { font-size: 21px; }
+  .esc-name { font-size: 20px; }
+  .kpi { padding: 18px; }
+  .kpi .v { font-size: 32px; }
+  .impact h3 { font-size: 19px; }
+  .impact .rate .v { font-size: 36px; }
+  .fb-summary .big { font-size: 42px; }
+  .submitted-title { font-size: 22px; }
+  .submitted-card { padding: 28px 20px; margin: 24px auto; }
+  .submitted-grid { gap: 12px; }
+
+  /* modals + forms */
+  .modal-content { padding: 24px; border-radius: 18px; }
+  .modal-title { font-size: 19px; }
+  .modal-actions { flex-direction: column-reverse; }
+  .modal-actions .btn { width: 100%; }
+
+  /* officer action buttons full-width for easy tapping */
+  .esc-actions { flex-direction: column; align-items: stretch; }
+  .esc-actions .btn { width: 100%; }
+  .esc-actions .fine { justify-content: center; }
+
+  /* footer → single column */
+  .foot-cols { grid-template-columns: 1fr; gap: 22px; }
+  .foot-bar-inner { flex-direction: column; align-items: flex-start; gap: 12px; }
+
+  /* login */
+  .login-card { padding: 32px 22px; border-radius: 22px; }
+  .staff-btn-row { position: static; margin-top: 22px; flex-wrap: wrap; justify-content: center; }
+
+  /* misc */
+  .stepper-container { margin-bottom: 28px; padding: 0; }
+  .trace-controls { flex-wrap: wrap; }
+}
+
+/* ---------- ≤400px : small phones ---------- */
+@media (max-width: 400px) {
+  .kpi-grid { grid-template-columns: 1fr; }
+  .submitted-grid { grid-template-columns: 1fr; }
+  .hero h1 { font-size: 30px; }
+  .btn { padding: 13px 18px; font-size: 15px; }
+  .staff-btn-row { flex-direction: column; width: 100%; padding: 0 16px; }
+  .staff-btn-row .officer-btn { width: 100%; }
+}

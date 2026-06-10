@@ -243,7 +243,7 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
     }
     if (step === 3) {
       if (docRequired && files.length === 0) {
-        setStepError(needsDocuments ? 'Please upload your salary certificate to continue.' : `This case requires a document: ${loanDetails?.requiredDocLabel}`)
+        setStepError(`This case requires a document: ${loanDetails?.requiredDocLabel ?? 'a supporting document'}`)
         return
       }
     }
@@ -261,7 +261,7 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
     if (!loanDetails) return
     if (resubmitGate?.blocked) { setSubmitError(resubmitGate.reason || 'This application cannot be re-submitted right now.'); return }
     if (needsDocuments) {
-      if (files.length === 0) { setSubmitError('Please upload your salary certificate to continue.'); return }
+      if (files.length === 0) { setSubmitError(`Please upload the required document: ${loanDetails.requiredDocLabel ?? 'a supporting document'}`); return }
     } else {
       if (loanDetails.requiresDocUpload && files.length === 0) { setSubmitError(`This case requires a document: ${loanDetails.requiredDocLabel}`); return }
       if (!form.consent) { setSubmitError('You must agree to the 20% total salary-deduction ceiling to proceed.'); return }
@@ -545,9 +545,9 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
           {step === 3 && (
             <div className="fade-in">
               <h3 style={{ fontSize: 22, fontWeight: 800, color: 'var(--ink-navy)', marginBottom: 6 }}>{t('Upload Documents')}</h3>
-              <p style={{ color: 'var(--muted)', fontSize: 14.5, marginBottom: 8 }}>{t('Please upload your current Salary Certificate to verify your income.')}</p>
+              <p style={{ color: 'var(--muted)', fontSize: 14.5, marginBottom: 8 }}>{t('Please upload the required document to verify your request.')}</p>
               <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 20, color: docRequired ? 'var(--red)' : 'var(--muted)' }}>
-                {docRequired ? `* Required for this case — ${needsDocuments ? 'a valid salary certificate (PDF)' : (loanDetails?.requiredDocLabel ?? 'a supporting document')}` : '(optional — income verified from records)'}
+                {docRequired ? `* Required for this case — ${loanDetails?.requiredDocLabel ?? 'a supporting document'}` : '(optional — income verified from records)'}
               </p>
 
               <div className="file-dropzone" onClick={() => document.getElementById('saddad-file-input')?.click()}
@@ -561,7 +561,7 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
                   </>
                 ) : (
                   <>
-                    <p style={{ margin: '16px 0 4px', fontWeight: 700, color: 'var(--ink)' }}>Drag &amp; drop your salary certificate</p>
+                    <p style={{ margin: '16px 0 4px', fontWeight: 700, color: 'var(--ink)' }}>Drag &amp; drop your document</p>
                     <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>PDF up to 5MB</p>
                     <span className="btn btn-neutral">Browse Files</span>
                   </>
@@ -628,7 +628,7 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
                     <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--red)' }}>AED {(Number(form.arrears_amount) || loanDetails.arrears_amount).toLocaleString()}</div>
                   </div>
                   <div style={{ borderTop: '1px solid var(--line)', paddingTop: 12 }}>
-                    <label style={{ fontSize: 13, fontWeight: 800, color: 'var(--muted)' }}>Salary Certificate</label>
+                    <label style={{ fontSize: 13, fontWeight: 800, color: 'var(--muted)' }}>Uploaded Document</label>
                     <div style={{ fontSize: 15, fontWeight: 600, color: files.length > 0 ? 'var(--green)' : 'var(--muted)' }}>
                       {files.length > 0 ? `✓ ${files[0].name}` : (docRequired ? 'Required — not uploaded' : 'Not uploaded (optional)')}
                     </div>

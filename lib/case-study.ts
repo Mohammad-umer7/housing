@@ -23,6 +23,17 @@ export type CaseStudy = {
   periodRule: 'Pass' | 'Fail'
   recommendation: Recommendation
   reasoning: string
+  // ── Two-document round-trip state ────────────────────────────────────────────
+  // Set when the salary cert was validated but a reason-specific supporting document is
+  // still owed; read by the lookup + submit routes so the resubmission only needs that
+  // supporting doc (the salary cert is trusted forward). Cleared once both docs are valid.
+  pendingSupportingDoc?: { type: string; label: string } | null
+  salaryCertValidated?: boolean
+  validatedSalary?: number | null
+  // ── Admin override ───────────────────────────────────────────────────────────
+  // Set when an administrator overrode the AI/officer decision (Approve / Reject /
+  // Return to Officer). Surfaced as a badge in the citizen, officer and admin UIs.
+  adminOverride?: { by: string; at: string; note: string; from: string; to: string } | null
 }
 
 export function buildCaseStudy(params: {

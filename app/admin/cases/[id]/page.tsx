@@ -14,6 +14,7 @@ import { useA11y } from '@/components/AccessibilityProvider'
 
 type AgentStep = { agentName: string; status: string; durationMs: number | null; resultSummary: string }
 type AuditEntry = { id: string; action: string; decision: string | null; rationale: string | null; processedBy: string | null; timestamp: string | null }
+type AdminOverride = { by: string; at: string; note: string; from: string; to: string }
 
 type CaseDetail = {
   case_number: string
@@ -38,6 +39,9 @@ type CaseDetail = {
   total_new_monthly_payment: number | null
   remaining_loan_months: number | null
   loan_bank_name: string | null
+  account_number?: string | null
+  iban?: string | null
+  case_study?: { recommendation?: string; adminOverride?: AdminOverride | null } | null
   verification_report?: {
     verdict: string
     confidenceScore: number
@@ -49,9 +53,10 @@ type CaseDetail = {
   auditLogs: AuditEntry[]
 }
 
-const DECISIONS = [
-  ['agree', 'Agree with AI — Approve'],
-  ['reject', 'Reject'],
+const OVERRIDES = [
+  ['APPROVE', 'Approve'],
+  ['REJECT', 'Reject'],
+  ['RETURN_TO_OFFICER', 'Return to Officer (reconsider)'],
 ] as const
 
 const statusPill: Record<string, string> = {
@@ -84,10 +89,9 @@ export default function AdminCaseDetailPage() {
   const [caseData, setCaseData] = useState<CaseDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [decision, setDecision] = useState<string>('agree')
+  const [override, setOverride] = useState<'APPROVE' | 'REJECT' | 'RETURN_TO_OFFICER'>('APPROVE')
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [submitted, setSubmitted] = useState(false)
   const [actionMsg, setActionMsg] = useState<string | null>(null)
 
   const load = useCallback(async () => {
@@ -112,26 +116,27 @@ export default function AdminCaseDetailPage() {
 
   useEffect(() => { void (async () => { await load() })() }, [load])
 
-  async function submitDecision() {
+  async function submitOverride() {
     if (!caseData) return
+    if (!notes.trim()) { setActionMsg('Error: a note explaining the override is required.'); return }
     setSubmitting(true)
     setActionMsg(null)
     try {
-      const action = decision === 'agree' ? 'APPROVE' : 'REJECT'
-      const res = await fetch(`/api/officer/cases/${encodeURIComponent(id)}`, {
+      const res = await fetch(`/api/admin/cases/${encodeURIComponent(id)}`, {
         method: 'PATCH', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, officerNotes: notes }),
+        body: JSON.stringify({ action: override, note: notes }),
       })
       if (!res.ok) {
         const j = await res.json().catch(() => ({}))
         throw new Error(j?.error ?? `Status ${res.status}`)
       }
-      setSubmitted(true)
-      setActionMsg(`Case ${action.toLowerCase()}d — audit log created. Citizen notified via WhatsApp.`)
+      const done: Record<string, string> = { APPROVE: 'approved', REJECT: 'rejected', RETURN_TO_OFFICER: 'returned to the officer' }
+      setActionMsg(`Decision overridden — case ${done[override]}. Audit log created. Citizen notified via WhatsApp.`)
+      setNotes('')
       await load()
     } catch (e) {
-      setActionMsg(`Error: ${e instanceof Error ? e.message : 'Failed to submit decision'}`)
+      setActionMsg(`Error: ${e instanceof Error ? e.message : 'Failed to submit override'}`)
     } finally {
       setSubmitting(false)
     }
@@ -178,7 +183,7 @@ export default function AdminCaseDetailPage() {
             </div>
           )}
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 18, alignItems: 'start' }}>
+          <div className="resp-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 18, alignItems: 'start' }}>
             {/* Panel 1 — Beneficiary & Loan */}
             <div className="card card-pad">
               <h3 style={{ fontSize: 18, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -193,6 +198,8 @@ export default function AdminCaseDetailPage() {
               {caseData.duration_months != null && <Row k={t('Duration')} v={`${caseData.duration_months} ${t('months')}`} />}
               {caseData.remaining_loan_months != null && <Row k={t('Remaining Loan Period')} v={`${caseData.remaining_loan_months} ${t('months')}`} />}
               {caseData.loan_bank_name && <Row k={t('Bank')} v={caseData.loan_bank_name} />}
+              {caseData.account_number && <Row k={t('Account Number')} v={caseData.account_number} />}
+              {caseData.iban && <Row k={t('IBAN')} v={caseData.iban} />}
               {caseData.consistency_score != null && <Row k={t('Fairness Score')} v={`${caseData.consistency_score}%`} warn={caseData.consistency_score < 70} />}
               {caseData.risk_level && <Row k={t('Risk Level')} v={caseData.risk_level} />}
               {caseData.risk_score != null && <Row k={t('Risk Score')} v={String(caseData.risk_score)} />}
@@ -283,7 +290,8 @@ export default function AdminCaseDetailPage() {
             {/* Panel 3 — Decision + Audit */}
             <div style={{ display: 'grid', gap: 18 }}>
               <div className="card card-pad">
-                <h3 style={{ fontSize: 18, marginBottom: 12 }}>{t('Officer Decision', 'قرار الموظف')}</h3>
+                <h3 style={{ fontSize: 18, marginBottom: 4 }}>{t('Administrator Override', 'تجاوز الإدارة')}</h3>
+                <p className="muted" style={{ fontSize: 12.5, marginBottom: 12 }}>{t('Override the AI / officer decision. This replaces the outcome everywhere and notifies the citizen.')}</p>
 
                 <div className="card" style={{ padding: 14, marginBottom: 14, background: 'var(--gold-tint)', borderColor: 'var(--gold-line)', boxShadow: 'none' }}>
                   <div className="muted" style={{ fontSize: 12.5 }}>{t('Current Status')}</div>
@@ -291,30 +299,32 @@ export default function AdminCaseDetailPage() {
                     {caseData.status}
                   </div>
                   {caseData.monthly_payment != null && <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>{t('Plan')}: {aed(caseData.monthly_payment)}/mo</div>}
-                  {caseData.risk_level && <div className="muted" style={{ fontSize: 12.5 }}>{t('Risk')}: {caseData.risk_level}</div>}
+                  {caseData.case_study?.adminOverride && (
+                    <div className="pill pill-gold" style={{ marginTop: 10 }}>★ {t('Overridden by')} {caseData.case_study.adminOverride.by}</div>
+                  )}
                 </div>
 
                 <div style={{ display: 'grid', gap: 8, marginBottom: 14 }}>
-                  {DECISIONS.map(([k, l]) => (
+                  {OVERRIDES.map(([k, l]) => (
                     <label key={k} style={{
                       display: 'flex', alignItems: 'center', gap: 10, padding: '11px 13px', borderRadius: 'var(--r)', cursor: 'pointer', fontSize: 14.5, fontWeight: 600,
-                      border: `1px solid ${decision === k ? 'var(--gold)' : 'var(--line-strong)'}`, background: decision === k ? 'var(--gold-tint)' : 'var(--panel)',
+                      border: `1px solid ${override === k ? 'var(--gold)' : 'var(--line-strong)'}`, background: override === k ? 'var(--gold-tint)' : 'var(--panel)',
                     }}>
-                      <input type="radio" name="dec" value={k} checked={decision === k} onChange={() => setDecision(k)} style={{ accentColor: 'var(--gold)' }} />
+                      <input type="radio" name="ovr" value={k} checked={override === k} onChange={() => setOverride(k)} style={{ accentColor: 'var(--gold)' }} />
                       {t(l)}
                     </label>
                   ))}
                 </div>
 
-                <textarea className="input" rows={3} placeholder={t('Officer notes…', 'ملاحظات الموظف…')} style={{ resize: 'vertical', fontFamily: 'inherit', marginBottom: 14 }}
+                <textarea className="input" rows={3} placeholder={t('Reason for override (required)…', 'سبب التجاوز (مطلوب)…')} style={{ resize: 'vertical', fontFamily: 'inherit', marginBottom: 14 }}
                   value={notes} onChange={e => setNotes(e.target.value)} />
 
-                <button className={'btn btn-block ' + (decision === 'agree' ? 'btn-green' : 'btn-red')} onClick={submitDecision} disabled={submitting || submitted}>
-                  {submitting ? t('Submitting…') : submitted ? t('Recorded ✓') : t('Submit Decision', 'إرسال القرار')}
+                <button className={'btn btn-block ' + (override === 'APPROVE' ? 'btn-green' : override === 'REJECT' ? 'btn-red' : 'btn-primary')} onClick={submitOverride} disabled={submitting}>
+                  {submitting ? t('Applying…') : t('Apply Override', 'تطبيق التجاوز')}
                 </button>
                 <p className="muted" style={{ fontSize: 12.5, marginTop: 10, display: 'flex', gap: 6 }}>
                   <Ico.warn width={14} height={14} style={{ flexShrink: 0, marginTop: 1 }} />
-                  {t('Decision will notify the applicant via WhatsApp and create an audit log entry.')}
+                  {t('This override updates the citizen, officer and admin views, notifies the applicant via WhatsApp, and is recorded in the audit log.')}
                 </p>
               </div>
 

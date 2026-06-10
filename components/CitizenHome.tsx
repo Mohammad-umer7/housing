@@ -11,6 +11,7 @@ type CaseCard = {
   full_name: string
   status: string
   recommendation: string | null
+  adminOverride?: boolean
   arrears_amount: number
   monthly_salary: number
   monthly_payment: number | null
@@ -127,9 +128,10 @@ export default function CitizenHome({ appId, onNewApplication, onResubmit, onVie
               <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--ink)', marginTop: 4 }}>{card?.full_name || fullName}</div>
               <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>Submitted {fmtDate(card?.created_at ?? card?.processed_at ?? null)}</div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <span className={`pill ${TONE_PILL[cs.tone]}`} style={{ fontSize: 14, padding: '8px 16px' }}>{t(cs.label)}</span>
               <span className="ar muted" style={{ fontSize: 13 }}>{cs.labelAr}</span>
+              {card?.adminOverride && <span className="pill pill-gold" style={{ fontSize: 12 }}>★ {t('Reviewed by an administrator')}</span>}
             </div>
           </div>
         </div>
@@ -195,7 +197,10 @@ export default function CitizenHome({ appId, onNewApplication, onResubmit, onVie
                     <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--ink)', marginTop: 4 }}>{c.full_name}</div>
                     <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>{t('Submitted', 'تم التقديم')} {fmtDate(c.created_at ?? c.processed_at)}</div>
                   </div>
-                  <span className={`pill ${TONE_PILL[cs.tone]}`} style={{ fontSize: 13, padding: '7px 14px' }}>{t(cs.label)}</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+                    <span className={`pill ${TONE_PILL[cs.tone]}`} style={{ fontSize: 13, padding: '7px 14px' }}>{t(cs.label)}</span>
+                    {c.adminOverride && <span className="pill pill-gold" style={{ fontSize: 11 }}>★ {t('Reviewed by an administrator')}</span>}
+                  </div>
                 </div>
 
                 <div style={{ display: 'flex', gap: 28, marginTop: 16, flexWrap: 'wrap' }}>

@@ -48,6 +48,8 @@ export async function rulesNode(state: SaddadStateType): Promise<SaddadNodeUpdat
       {
         documentFresh: applicant.document_fresh !== false,
         hasActiveApplication: Boolean(applicant.has_active_application),
+        // Direct Debit Authority required (G-06): no DDA → reject + enrol with EDB.
+        hasDda: applicant.auto_dda !== false,
         // When the document agent bounced the upload back (wrong document / details do
         // not match), surface its specific reason as the G-01 citizen-facing message.
         documentRequestReason: String(applicant.document_authority_reason || '') || undefined,

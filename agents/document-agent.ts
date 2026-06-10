@@ -29,7 +29,7 @@ import {
 import { checkArithmetic } from '@/lib/document-forensics'
 import { assessDocumentAuthenticity, isGeminiConfigured } from '@/lib/llm/gemini'
 import { markFallback } from '@/lib/i18n'
-import { classifyRequestCircumstances, determineRequiredDocuments } from '@/governance/housing-arrears'
+import { classifyRequestCircumstances, determineRequiredDocuments, type DocSpec } from '@/governance/housing-arrears'
 import type { SaddadStateType, SaddadNodeUpdate } from './graph-state'
 import type { DocAuthenticity, VerificationReport } from './types'
 
@@ -70,7 +70,15 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
       temporary_circumstance: circ.temporary_circumstance,
       hasIncomeRecord: recordExists,
     })
-    const expectedType = required.primaryType
+    // Two-document round-trip: if the salary cert was already validated in a prior
+    // submission, THIS submission is the supporting-doc stage; otherwise it's the primary
+    // (mandatory) stage. The uploaded file (always one per submission) is validated against
+    // the current stage's expected type.
+    const salaryCertAlreadyValidated = Boolean(formData.salaryCertAlreadyValidated)
+    const carriedSalary = Number(formData.validatedSalary) || null
+    const stage: 'primary' | 'supporting' =
+      salaryCertAlreadyValidated && required.supporting ? 'supporting' : 'primary'
+    const expectedType = stage === 'supporting' ? required.supporting!.type : required.primary.type
     const profile = DOC_TYPE_PROFILES[expectedType]
 
     const extractedFields = (formData.pdfExtractedFields ?? {}) as {
@@ -96,6 +104,8 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
           gross_salary: onRecordSalary!,
           issue_date: '',
           status: 'valid',
+          account_number: onRecord!.account_number ? String(onRecord!.account_number) : null,
+          iban: onRecord!.iban ? String(onRecord!.iban) : null,
         }
       : null
 
@@ -122,6 +132,8 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
           name: extractedFields.employeeName ?? null,
           employer: extractedFields.employerName ?? null,
           emiratesId: (formData.pdfExtractedEid as string | null) ?? null,
+          iban: (formData.pdfExtractedIban as string | null) ?? null,
+          account: (formData.pdfExtractedAccount as string | null) ?? null,
         },
         structure: (formData.pdfStructure as StructureCheck | null) ?? null,
         arithmetic: (formData.pdfArithmetic as ReturnType<typeof checkArithmetic> | null) ?? null,
@@ -151,14 +163,53 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
 
     // Only the WRONG DOCUMENT TYPE bounces back to the citizen (they simply uploaded
     // the wrong file — give them the exact ask). Every authenticity/fraud signal
-    // (mismatch / suspicious / tampered / unverifiable) proceeds so the Critic
-    // escalates it to a human officer with the AI rationale.
-    const needsResubmit = documentUploaded && verdict === 'invalid'
-    const complete = documentUploaded && !needsResubmit
+    // (mismatch / suspicious / tampered) proceeds so the Critic escalates it to a human
+    // officer with the AI rationale — never an auto-rejection on authenticity.
+    const wrongType = documentUploaded && verdict === 'invalid'
+    const fraudSignal = documentUploaded && ['mismatch', 'suspicious', 'tampered'].includes(verdict)
+    const accepted = documentUploaded && !wrongType // present & right type (fraud still proceeds)
+
+    // ── Two-document completeness ────────────────────────────────────────────────
+    // `complete` (→ document_valid → G-01) is true only when EVERY required document for
+    // this case is satisfied. A mandatory salary cert plus a reason-specific supporting
+    // doc is collected over a Request-Documents round-trip: the salary cert first, then
+    // the supporting doc (the salary cert is trusted forward so it isn't re-uploaded).
+    let complete: boolean
+    let owedDoc: DocSpec | null
+    let pendingSupportingDoc: { type: string; label: string } | null = null
+    let salaryCertValidated = salaryCertAlreadyValidated
+    let validatedSalary: number | null = stage === 'supporting' ? carriedSalary : null
+
+    if (stage === 'supporting') {
+      // Salary cert trusted from the prior submission; validate the supporting doc.
+      complete = accepted
+      owedDoc = accepted ? null : required.supporting
+      if (!accepted) pendingSupportingDoc = required.supporting
+    } else if (!accepted) {
+      // Primary missing or wrong type → ask for the primary document.
+      complete = false
+      owedDoc = required.primary
+    } else if (fraudSignal) {
+      // Authenticity concern on the primary → proceed now so the Critic force-escalates a
+      // human review (do not defer behind a supporting-doc round-trip).
+      complete = true
+      owedDoc = null
+    } else if (required.supporting) {
+      // Clean primary, but a reason-specific supporting doc is still owed → round-trip.
+      // Carry the validated salary cert forward so the resubmission only needs that doc.
+      complete = false
+      owedDoc = required.supporting
+      pendingSupportingDoc = required.supporting
+      salaryCertValidated = true
+      validatedSalary = extractedSalary ?? onRecordSalary
+    } else {
+      complete = true
+      owedDoc = null
+    }
 
     // Specific, citizen-facing reason when we bounce the file back for re-submission.
-    const resubmitReason = needsResubmit
-      ? `The uploaded file does not appear to be a ${profile.label}. Please upload: ${required.labels.join('; ')}.`
+    const resubmitReason = wrongType
+      ? `The uploaded file does not appear to be a ${profile.label}. Please upload: ${owedDoc?.label ?? required.primary.label}.`
       : ''
 
     const authenticity: DocAuthenticity = verdict
@@ -167,13 +218,16 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
     // Citizen-facing reason: the specific resubmit message when bouncing the file back;
     // otherwise the verification summary (used by the Critic when it escalates — this is
     // the AI rationale both the officer and the citizen see).
-    const authorityReason = needsResubmit ? resubmitReason : verificationReport.summary
+    const authorityReason = wrongType ? resubmitReason : verificationReport.summary
     const salaryMismatch = authenticity === 'mismatch'
 
-    const documents = complete ? [expectedType] : []
-    // What to ask the citizen for: the specific resubmit reason for a wrong-type
-    // upload, otherwise the situation's required documents (missing upload).
-    const missing = complete ? [] : needsResubmit ? [resubmitReason] : required.labels
+    const primaryDone = stage === 'supporting' || accepted
+    const documents = complete
+      ? [required.primary.type, ...(required.supporting ? [required.supporting.type] : [])]
+      : (primaryDone ? [required.primary.type] : [])
+    // What to ask the citizen for: the specific resubmit reason for a wrong-type upload,
+    // otherwise the next owed document (missing upload).
+    const missing = complete ? [] : wrongType ? [resubmitReason] : owedDoc ? [owedDoc.label] : required.labels
     const visionRan = isGeminiConfigured() && documentUploaded
     const fallbackTag = documentUploaded && !visionRan ? ' · vision off (fallback)' : ''
     const ocrTag = ocrWasFallback ? ' · OCR regex (fallback)' : ''
@@ -181,10 +235,12 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
       ? `✓ verified ${verificationReport.confidenceScore}%`
       : `⚠ ${authenticity} (${verificationReport.confidenceScore}%)`
     const stateLabel = !documentUploaded
-      ? `Documents required (${expectedType})`
-      : needsResubmit
+      ? `${stage === 'supporting' ? 'Supporting document' : 'Documents'} required (${expectedType})`
+      : wrongType
       ? `Resubmit required — not a ${profile.label}`
-      : `Document uploaded (${expectedType})`
+      : stage === 'primary' && !complete
+      ? `Salary cert verified — supporting document required (${required.supporting?.type ?? ''})`
+      : `Document verified (${expectedType})`
     const resultSummary = `${stateLabel} · ${icon}${fallbackTag}${ocrTag}`
 
     const duration = Date.now() - start
@@ -201,6 +257,7 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
         documents, complete, missing, salaryMismatch, extractedSalary, confidence,
         authenticity, authorityName, authoritySalary, authorityReason, verificationReport,
         requiredDocuments: required.labels,
+        stage, pendingSupportingDoc, salaryCertValidated, validatedSalary,
       },
     }
   } catch (err) {

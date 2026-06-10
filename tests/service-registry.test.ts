@@ -139,6 +139,7 @@ describe('service registry — platform extensibility', () => {
   test('the same evaluateRules engine drives both rulebooks (different rules, identical control flow)', () => {
     const housing = evaluateRules(GOVERNANCE_RULES, {
       hasActiveApplication: false,
+      hasDda: true,
       documentsValid: false,
       documentFresh: true,
       twentyPercentRulePass: true,

@@ -29,12 +29,13 @@ export async function GET(req: NextRequest) {
     const rows = emiratesId ? await getCasesByEmiratesId(emiratesId) : []
 
     const cases = rows.map((c) => {
-      const study = (c.case_study && typeof c.case_study === 'object' ? c.case_study : {}) as { recommendation?: unknown }
+      const study = (c.case_study && typeof c.case_study === 'object' ? c.case_study : {}) as { recommendation?: unknown; adminOverride?: { by?: unknown } | null }
       return {
         case_number: String(c.case_number ?? ''),
         full_name: String(c.full_name ?? applicant.full_name ?? ''),
         status: String(c.status ?? 'pending'),
         recommendation: study.recommendation ? String(study.recommendation) : null,
+        adminOverride: study.adminOverride ? true : false,
         arrears_amount: Number(c.arrears_amount) || 0,
         monthly_salary: Number(c.monthly_salary) || 0,
         monthly_payment: c.monthly_payment != null ? Number(c.monthly_payment) : null,

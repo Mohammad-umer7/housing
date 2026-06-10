@@ -44,6 +44,9 @@ export async function communicationNode(state: SaddadStateType): Promise<SaddadN
   const name = String(applicant.full_name || 'Applicant')
   const recommendation = toRecommendation(decision as GovernanceDecision, govResult?.rule_triggered)
   const label = decisionLabel(decision, recommendation)
+  // For a "Request Documents" outcome, name the exact document still owed (the salary cert,
+  // or the reason-specific supporting doc on the round-trip) so the citizen knows what to send.
+  const docAsk = recommendation === 'Request Documents' ? (state.docResult?.missing ?? []).filter(Boolean).join('; ') : ''
   console.log(`[CommunicationAgent] START case=${caseNumber}`)
   const start = Date.now()
   const agent: AgentName = 'communication_agent'
@@ -71,6 +74,8 @@ export async function communicationNode(state: SaddadStateType): Promise<SaddadN
           ? 'Congratulations — your rescheduling plan is now in place and will be applied to your account.'
           : decision === 'ESCALATED'
           ? 'Your case has been referred to a specialist officer who will review it and contact you within 5 working days.'
+          : docAsk
+          ? `To continue with your request, please upload: ${docAsk}`
           : recovery || 'Please visit your nearest service center for assistance.',
     }
 
@@ -90,6 +95,7 @@ INTERNAL DECISION: ${decision} (recommendation: ${recommendation})
 REVIEW REASONING (rewrite for the citizen, remove any jargon): ${rationale || 'n/a'}
 ${approvedPlanLine ? `APPROVED PLAN FIGURES (already shown separately, do not repeat verbatim): ${approvedPlanLine}` : ''}
 NEXT-STEPS / RECOVERY GUIDANCE (paraphrase warmly for the citizen): ${recovery || (decision === 'APPROVED' ? 'Approved — no further action needed.' : 'n/a')}
+${docAsk ? `DOCUMENT TO REQUEST (ask the citizen clearly to upload exactly this): ${docAsk}` : ''}
 
 Write greeting, explanation and next_steps for this applicant.`
 
