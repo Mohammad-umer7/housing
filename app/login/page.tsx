@@ -1,16 +1,17 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Emblem, Ico } from '@/components/saddad-ui'
 import { useA11y } from '@/components/AccessibilityProvider'
 
-// SADDAD sign-in (MOEI design). Citizens "sign in with UAE PASS" by entering their
-// Application ID — we authenticate (demo session) and validate the ID against the real
-// lookup, then carry it to the Submit wizard. Officers and admins sign in with their
-// own credentials (separate entry points — they land on different portals).
-// Production swaps the demo session for a real UAE PASS OIDC flow.
 type Modal = null | 'uaepass' | 'officer' | 'admin' | 'whatis'
+
+type Applicant = {
+  case_number: string
+  full_name: string
+  full_name_ar: string | null
+}
 
 export default function LoginPage() {
   const router = useRouter()
@@ -21,6 +22,40 @@ export default function LoginPage() {
   const [offUser, setOffUser] = useState('')
   const [offPass, setOffPass] = useState('')
   const [busy, setBusy] = useState(false)
+
+  // UAE PASS applicant picker
+  const [applicants, setApplicants] = useState<Applicant[]>([])
+  const [pickSearch, setPickSearch] = useState('')
+  const [pickLoading, setPickLoading] = useState(false)
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    if (activeModal !== 'uaepass') return
+    fetchApplicants('')
+  }, [activeModal])
+
+  async function fetchApplicants(q: string) {
+    setPickLoading(true)
+    try {
+      const res = await fetch(`/api/auth/demo-applicants?q=${encodeURIComponent(q)}`)
+      const json = await res.json()
+      setApplicants(json.success ? json.data : [])
+    } catch {
+      setApplicants([])
+    } finally {
+      setPickLoading(false)
+    }
+  }
+
+  function onSearchChange(val: string) {
+    setPickSearch(val)
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+    searchTimer.current = setTimeout(() => fetchApplicants(val), 300)
+  }
+
+  function pickApplicant(a: Applicant) {
+    setCitId(a.case_number)
+  }
 
   function closeModal() {
     setActiveModal(null)
@@ -34,14 +69,12 @@ export default function LoginPage() {
     setBusy(true)
     setErrorMsg('')
     try {
-      // 1) Establish a session so the protected lookup/submit APIs work.
       const login = await fetch('/api/auth/demo-login', { method: 'POST' })
       if (!login.ok) {
         setErrorMsg('Sign-in is unavailable right now. Please try again.')
         setBusy(false)
         return
       }
-      // 2) Validate the Application ID against the real Programme records.
       const res = await fetch(`/api/v1/cases/lookup?caseNumber=${encodeURIComponent(cleanId)}`)
       const env = await res.json()
       if (!res.ok || !env.success) {
@@ -49,7 +82,6 @@ export default function LoginPage() {
         setBusy(false)
         return
       }
-      // 3) Carry the verified ID to the Submit wizard, which auto-loads the case.
       sessionStorage.setItem('saddad_prefill_appid', cleanId)
       sessionStorage.setItem('saddad_app_id', cleanId)
       sessionStorage.setItem('saddad_logged_in', 'true')
@@ -78,8 +110,6 @@ export default function LoginPage() {
         return
       }
       sessionStorage.setItem('saddad_logged_in', 'true')
-      // Route by the role the credentials actually carry (admin creds entered in the
-      // officer modal still land on /admin, and vice versa — never a dead end).
       router.push(data.data?.role === 'admin' ? '/admin' : '/officer')
       router.refresh()
     } catch {
@@ -138,7 +168,7 @@ export default function LoginPage() {
       {/* UAE PASS LOGIN MODAL */}
       {activeModal === 'uaepass' && (
         <div className="modal-backdrop" onClick={closeModal}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480, width: '95vw' }}>
             <button className="modal-close" onClick={closeModal}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
             </button>
@@ -153,8 +183,74 @@ export default function LoginPage() {
             <form className="modal-form" onSubmit={handleCitSubmit}>
               <div className="field">
                 <label>{t('Application ID')} / رقم القضية</label>
-                <input type="text" className="input" required placeholder="e.g. MSZHP_111325" value={citId} onChange={(e) => setCitId(e.target.value)} />
+                <input
+                  type="text"
+                  className="input"
+                  required
+                  placeholder="e.g. MSZHP_111325"
+                  value={citId}
+                  onChange={(e) => setCitId(e.target.value)}
+                />
               </div>
+
+              {/* Demo applicant picker */}
+              <div style={{ marginBottom: 8 }}>
+                <p style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--body)', opacity: 0.6, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+                  Demo accounts — click to select
+                </p>
+                <div style={{ position: 'relative', marginBottom: 6 }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', opacity: 0.4, pointerEvents: 'none' }}>
+                    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+                  </svg>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="Search by ID or name…"
+                    value={pickSearch}
+                    onChange={(e) => onSearchChange(e.target.value)}
+                    style={{ paddingLeft: 32, fontSize: 13 }}
+                  />
+                </div>
+                <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--r)', background: 'var(--surface)' }}>
+                  {pickLoading ? (
+                    <p style={{ padding: '12px 14px', fontSize: 13, color: 'var(--body)', opacity: 0.5, margin: 0 }}>Loading…</p>
+                  ) : applicants.length === 0 ? (
+                    <p style={{ padding: '12px 14px', fontSize: 13, color: 'var(--body)', opacity: 0.5, margin: 0 }}>No results found.</p>
+                  ) : (
+                    applicants.map((a) => (
+                      <button
+                        key={a.case_number}
+                        type="button"
+                        onClick={() => pickApplicant(a)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          width: '100%',
+                          padding: '9px 14px',
+                          background: citId === a.case_number ? 'rgba(194,161,78,0.10)' : 'transparent',
+                          border: 'none',
+                          borderBottom: '1px solid var(--border)',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          gap: 8,
+                        }}
+                      >
+                        <span style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--ink-navy)', fontWeight: 700, flexShrink: 0 }}>
+                          {a.case_number}
+                        </span>
+                        <span style={{ fontSize: 12.5, color: 'var(--body)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'right' }}>
+                          {a.full_name}{a.full_name_ar ? ` · ${a.full_name_ar}` : ''}
+                        </span>
+                        {citId === a.case_number && (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gold-dark)" strokeWidth="2.5" strokeLinecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+                        )}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+
               {errorMsg && (
                 <div style={{ color: 'var(--red)', fontSize: 13, fontWeight: 600, background: 'var(--red-soft)', padding: '10px 14px', borderRadius: 'var(--r)', border: '1px solid rgba(200, 16, 46, 0.15)' }}>
                   {errorMsg}
@@ -171,7 +267,7 @@ export default function LoginPage() {
         </div>
       )}
 
-      {/* OFFICER / ADMIN LOGIN MODALS (separate entry points, shared form logic) */}
+      {/* OFFICER / ADMIN LOGIN MODALS */}
       {(activeModal === 'officer' || activeModal === 'admin') && (
         <div className="modal-backdrop" onClick={closeModal}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -185,6 +281,14 @@ export default function LoginPage() {
               {activeModal === 'officer' ? t('Officer Login') : t('Admin Login')}
             </div>
             <form className="modal-form" onSubmit={handleOffSubmit}>
+              <button
+                type="button"
+                onClick={() => { setOffUser(activeModal === 'officer' ? 'officer' : 'admin'); setOffPass('saddad-2026') }}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', padding: '8px 12px', marginBottom: 4, background: 'rgba(194,161,78,0.08)', border: '1px dashed rgba(194,161,78,0.5)', borderRadius: 'var(--r)', fontSize: 12.5, color: 'var(--gold-dark)', fontWeight: 600, cursor: 'pointer' }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M14 12H3"/></svg>
+                Fill demo credentials
+              </button>
               <div className="field">
                 <label>{activeModal === 'officer' ? t('Officer Username / ID') : t('Admin Username / ID')}</label>
                 <input type="text" className="input" required placeholder={activeModal === 'officer' ? 'e.g. officer' : 'e.g. admin'} value={offUser} onChange={(e) => setOffUser(e.target.value)} />
