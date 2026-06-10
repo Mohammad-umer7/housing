@@ -34,6 +34,8 @@ type LoanDetails = {
   is_priority: boolean
   requiresDocUpload: boolean
   requiredDocLabel: string
+  docStage: 'primary' | 'supporting'
+  supportingDocLabel: string | null
 }
 
 type FormState = {
@@ -111,17 +113,17 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
     : [
         { num: 1, label: 'Verify Application' },
         { num: 2, label: 'Financial Details' },
-        { num: 3, label: 'Documents' },
-        { num: 4, label: 'Reason' },
+        { num: 3, label: 'Reason' },
+        { num: 4, label: 'Documents' },
         { num: 5, label: 'Review & Submit' },
       ]
 
   const signLanguageVideo =
     phase === 'confirmed'
       ? SIGN_LANGUAGE_VIDEOS.caseSubmitted
-      : step === 3
+      : (step === 3 && needsDocuments) || step === 4
         ? SIGN_LANGUAGE_VIDEOS.document
-        : step === 4 && !needsDocuments
+        : step === 3 && !needsDocuments
           ? SIGN_LANGUAGE_VIDEOS.reason
           : (step === 5 || (step === 4 && needsDocuments))
             ? null
@@ -162,6 +164,8 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
         is_priority: Boolean(d.uae_pass?.is_priority),
         requiresDocUpload: Boolean(d.requiredDocuments?.requiresUpload),
         requiredDocLabel: d.requiredDocuments?.label ?? 'A recent salary certificate (issued within the last 30 days)',
+        docStage: d.requiredDocuments?.stage ?? 'primary',
+        supportingDocLabel: d.requiredDocuments?.supporting?.label ?? null,
       })
       const reqDocs = Boolean(d.needsDocuments)
       setNeedsDocuments(reqDocs)
@@ -271,14 +275,20 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
         if (!(Number(form.arrears_amount) > 0)) { setStepError('Enter a valid amount due greater than 0.'); return }
       }
     }
-    if (step === 3) {
+    // Step 3 = Reason (non-needsDocuments) or Documents (needsDocuments)
+    if (step === 3 && needsDocuments) {
       if (docRequired && files.length === 0) {
         setStepError(`This case requires a document: ${loanDetails?.requiredDocLabel ?? 'a supporting document'}`)
         return
       }
-      if (needsDocuments) {
-        setStep(4)
-        window.scrollTo(0, 0)
+      setStep(4)
+      window.scrollTo(0, 0)
+      return
+    }
+    // Step 4 = Documents (non-needsDocuments) — validate doc before proceeding
+    if (step === 4 && !needsDocuments) {
+      if (docRequired && files.length === 0) {
+        setStepError(`This case requires a document: ${loanDetails?.requiredDocLabel ?? 'a supporting document'}`)
         return
       }
     }
@@ -289,11 +299,6 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
     // Step 2 is the first wizard step (identity was done at sign-in), so Back from it goes
     // to the home page rather than to a non-existent step 1.
     if (step <= 2) { onHome(); return }
-    if (step === 4 && needsDocuments) {
-      setStep(3)
-      window.scrollTo(0, 0)
-      return
-    }
     setStep(step - 1); window.scrollTo(0, 0)
   }
 
@@ -582,71 +587,120 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
             </div>
           )}
 
-          {/* Step 3: Documents */}
-          {step === 3 && (
+          {/* Step 3: Reason (non-needsDocuments) / Documents (needsDocuments) */}
+          {/* Step 4: Documents (non-needsDocuments) */}
+          {((step === 3 && needsDocuments) || (step === 4 && !needsDocuments)) && (
             <div className="fade-in">
               <h3 style={{ fontSize: 22, fontWeight: 800, color: 'var(--ink-navy)', marginBottom: 6 }}>{t('Upload Documents')}</h3>
               <p style={{ color: 'var(--muted)', fontSize: 14.5, marginBottom: 8 }}>{t('Please upload the required document to verify your request.')}</p>
-              <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 20, color: docRequired ? 'var(--red)' : 'var(--muted)' }}>
-                {docRequired ? `* Required for this case — ${loanDetails?.requiredDocLabel ?? 'a supporting document'}` : '(optional — income verified from records)'}
-              </p>
+              {(() => {
+                const reason = form.reschedule_reason
+                const stage = loanDetails?.docStage ?? 'primary'
 
-              <div className="file-dropzone" onClick={() => document.getElementById('saddad-file-input')?.click()}
-                onDrop={handleDrop} onDragOver={(e) => { e.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)}
-                style={dragging ? { borderColor: 'var(--gold)', background: 'var(--cream-soft)' } : undefined}>
-                <Ico.doc2 width={44} height={44} style={{ color: 'var(--gold)', opacity: 0.8 }} />
-                {files.length > 0 ? (
-                  <>
-                    <p style={{ margin: '16px 0 4px', fontWeight: 700, color: 'var(--green)' }}>✓ {files[0].name}</p>
-                    <p style={{ fontSize: 13, color: 'var(--muted)' }}>Click to upload a different file</p>
-                  </>
-                ) : (
-                  <>
-                    <p style={{ margin: '16px 0 4px', fontWeight: 700, color: 'var(--ink)' }}>Drag &amp; drop your document</p>
-                    <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>PDF up to 5MB</p>
-                    <span className="btn btn-neutral">Browse Files</span>
-                  </>
-                )}
-                <input id="saddad-file-input" type="file" accept=".pdf" className="hidden" style={{ display: 'none' }} onChange={handleFileInput} />
-              </div>
+                // Primary doc label based on reason + stage
+                let primaryLabel = loanDetails?.requiredDocLabel ?? 'a supporting document'
+                if (stage === 'primary') {
+                  if (reason === 'job_loss') {
+                    primaryLabel = 'An official non-work / termination letter from your employer or the labour authority'
+                  } else if (['medical_expenses', 'family_circumstances', 'salary_reduction', 'business_failure'].includes(reason)) {
+                    primaryLabel = 'A recent salary certificate (issued within the last 30 days)'
+                  }
+                }
 
-              {!needsDocuments && (
-                <div style={{ marginTop: 24 }}>
-                  <label style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--ink-navy)', display: 'block', marginBottom: 8 }}>
-                    <span>Supporting Document (Optional)</span>
-                    <span className="ar" style={{ float: 'right' }}>المستند الداعم (اختياري)</span>
-                  </label>
-                  <div className="file-dropzone" onClick={() => document.getElementById('saddad-supporting-file-input')?.click()}
-                    onDrop={handleSupportingDrop} onDragOver={(e) => { e.preventDefault(); setSupportingDragging(true) }} onDragLeave={() => setSupportingDragging(false)}
-                    style={supportingDragging ? { borderColor: 'var(--gold)', background: 'var(--cream-soft)' } : undefined}>
-                    <Ico.doc2 width={44} height={44} style={{ color: 'var(--gold)', opacity: 0.8 }} />
-                    {supportingFiles.length > 0 ? (
+                // Supporting doc label based on reason
+                const supportingLabel =
+                  loanDetails?.supportingDocLabel ??
+                  (reason === 'medical_expenses' ? 'A medical report or official document confirming your medical circumstance' :
+                   reason === 'salary_reduction' ? 'An official employer letter confirming your salary reduction' :
+                   reason === 'business_failure' ? 'A recent bank statement or income statement covering the last 3 months' :
+                   reason === 'family_circumstances' ? 'An official document supporting your family circumstance' :
+                   reason !== 'job_loss' ? 'A supporting document for your circumstance (e.g. medical report, employer letter, or bank statement)' : null)
+
+                // When in supporting stage, the primary is already validated — show only supporting
+                const showPrimary = stage !== 'supporting'
+                // Show supporting field for all non-job-loss primary-stage cases
+                const showSupporting = stage === 'supporting' || (stage === 'primary' && reason !== 'job_loss')
+
+                return (
+                  <>
+                    {showPrimary && (
                       <>
-                        <p style={{ margin: '16px 0 4px', fontWeight: 700, color: 'var(--green)' }}>✓ {supportingFiles[0].name}</p>
-                        <p style={{ fontSize: 13, color: 'var(--muted)' }}>Click to upload a different file</p>
-                      </>
-                    ) : (
-                      <>
-                        <p style={{ margin: '16px 0 4px', fontWeight: 700, color: 'var(--ink)' }}>Drag &amp; drop your supporting document</p>
-                        <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>PDF up to 5MB (e.g. non-work letter, medical report, bank statement)</p>
-                        <span className="btn btn-neutral">Browse Files</span>
+                        {showSupporting && (
+                          <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--gold-dark)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                            Step 1 of 2 — Primary Document
+                          </p>
+                        )}
+                        <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 16, color: docRequired ? 'var(--red)' : 'var(--muted)' }}>
+                          {docRequired ? `* Required — ${primaryLabel}` : '(optional — income verified from records)'}
+                        </p>
+                        <div className="file-dropzone" onClick={() => document.getElementById('saddad-file-input')?.click()}
+                          onDrop={handleDrop} onDragOver={(e) => { e.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)}
+                          style={dragging ? { borderColor: 'var(--gold)', background: 'var(--cream-soft)' } : undefined}>
+                          <Ico.doc2 width={44} height={44} style={{ color: 'var(--gold)', opacity: 0.8 }} />
+                          {files.length > 0 ? (
+                            <>
+                              <p style={{ margin: '16px 0 4px', fontWeight: 700, color: 'var(--green)' }}>✓ {files[0].name}</p>
+                              <p style={{ fontSize: 13, color: 'var(--muted)' }}>Click to upload a different file</p>
+                            </>
+                          ) : (
+                            <>
+                              <p style={{ margin: '16px 0 4px', fontWeight: 700, color: 'var(--ink)' }}>Drag &amp; drop your document</p>
+                              <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>PDF up to 5MB</p>
+                              <span className="btn btn-neutral">Browse Files</span>
+                            </>
+                          )}
+                          <input id="saddad-file-input" type="file" accept=".pdf" className="hidden" style={{ display: 'none' }} onChange={handleFileInput} />
+                        </div>
                       </>
                     )}
-                    <input id="saddad-supporting-file-input" type="file" accept=".pdf" className="hidden" style={{ display: 'none' }} onChange={handleSupportingFileInput} />
-                  </div>
-                </div>
-              )}
+
+                    {showSupporting && supportingLabel && (
+                      <div style={{ marginTop: showPrimary ? 28 : 0 }}>
+                        {showPrimary && (
+                          <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--gold-dark)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                            Step 2 of 2 — Supporting Document
+                          </p>
+                        )}
+                        <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 16, color: 'var(--red)' }}>
+                          {stage === 'supporting' ? `* Required — ${supportingLabel}` : `* Also required — ${supportingLabel}`}
+                        </p>
+                        <div className="file-dropzone" onClick={() => document.getElementById('saddad-supporting-file-input')?.click()}
+                          onDrop={handleSupportingDrop} onDragOver={(e) => { e.preventDefault(); setSupportingDragging(true) }} onDragLeave={() => setSupportingDragging(false)}
+                          style={supportingDragging ? { borderColor: 'var(--gold)', background: 'var(--cream-soft)' } : undefined}>
+                          <Ico.doc2 width={44} height={44} style={{ color: 'var(--gold)', opacity: 0.8 }} />
+                          {supportingFiles.length > 0 ? (
+                            <>
+                              <p style={{ margin: '16px 0 4px', fontWeight: 700, color: 'var(--green)' }}>✓ {supportingFiles[0].name}</p>
+                              <p style={{ fontSize: 13, color: 'var(--muted)' }}>Click to upload a different file</p>
+                            </>
+                          ) : (
+                            <>
+                              <p style={{ margin: '16px 0 4px', fontWeight: 700, color: 'var(--ink)' }}>Drag &amp; drop your supporting document</p>
+                              <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>PDF up to 5MB</p>
+                              <span className="btn btn-neutral">Browse Files</span>
+                            </>
+                          )}
+                          <input id="saddad-supporting-file-input" type="file" accept=".pdf" className="hidden" style={{ display: 'none' }} onChange={handleSupportingFileInput} />
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
 
               {stepError && <p style={{ color: 'var(--red)', fontSize: 13.5, marginTop: 16 }}>⚠ {stepError}</p>}
               <div style={{ display: 'flex', gap: 16, marginTop: 28 }}>
                 <button className="btn btn-neutral" style={{ flex: 1 }} onClick={prevStep}>Back / العودة</button>
-                <button className="btn btn-primary" style={{ flex: 2 }} onClick={nextStep}>Continue / متابعة <Ico.chevR width={16} height={16} /></button>
+                <button className="btn btn-primary" style={{ flex: 2 }} onClick={nextStep}
+                  disabled={docRequired && files.length === 0}>
+                  Continue / متابعة <Ico.chevR width={16} height={16} />
+                </button>
               </div>
             </div>
           )}
 
-          {/* Step 4: Reason */}
-          {step === 4 && !needsDocuments && (
+          {/* Step 3: Reason (non-needsDocuments path) */}
+          {step === 3 && !needsDocuments && (
             <div className="fade-in" style={{ textAlign: 'left' }}>
               <h3 style={{ fontSize: 22, fontWeight: 800, color: 'var(--ink-navy)', marginBottom: 6, textAlign: 'center' }}>{t('Reason for Rescheduling')}</h3>
               <p style={{ color: 'var(--muted)', fontSize: 14.5, marginBottom: 24, textAlign: 'center' }}>{t('Explain why you require a rescheduling of your housing loan payments.')}</p>
@@ -659,7 +713,7 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
                   <option value="business_failure">Business Failure / إفلاس تجاري</option>
                   <option value="salary_reduction">Salary Reduction / تخفيض الراتب</option>
                   <option value="family_circumstances">Family Circumstances / ظروف أسرية</option>
-                  <option value="medical_expenses">Medical Expenses / نفقات طبية</option>
+                  <option value="medical_expenses">Medical Condition / حالة طبية</option>
                 </select>
               </div>
               <div className="field">
@@ -675,7 +729,7 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
             </div>
           )}
 
-          {/* Step 5: Review & Submit (or Step 4 if needsDocuments is true) */}
+          {/* Step 5: Review & Submit (or Step 4 if needsDocuments) */}
           {((step === 5 && !needsDocuments) || (step === 4 && needsDocuments)) && loanDetails && (
             <div className="fade-in" style={{ textAlign: 'left' }}>
               <h3 style={{ fontSize: 22, fontWeight: 800, color: 'var(--ink-navy)', marginBottom: 6, textAlign: 'center' }}>{t('Review & Submit')}</h3>

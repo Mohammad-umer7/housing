@@ -151,6 +151,7 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
         arithmetic: (formData.pdfArithmetic as ReturnType<typeof checkArithmetic> | null) ?? null,
         vision,
         validatedSalaryCertDate: formData.validatedSalaryCertDate ? String(formData.validatedSalaryCertDate) : null,
+        hashIntegrity: (formData.pdfHashIntegrity as { hasToken: boolean; hashMatch: boolean; storedHash: string | null; computedHash: string | null } | null) ?? null,
       })
 
       // If primary is valid/accepted and we have a supporting document uploaded in this same primary stage:
@@ -258,14 +259,16 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
 
     const verdict = verificationReport.verdict
 
-    // Only the WRONG DOCUMENT TYPE bounces back to the citizen (they simply uploaded
-    // the wrong file — give them the exact ask). Every authenticity/fraud signal
-    // (mismatch / suspicious / tampered) proceeds so the Critic force-escalates it to
-    // a HUMAN OFFICER — the citizen is NEVER auto-rejected for a document
-    // authenticity problem, and both the citizen and the officer receive
-    // the AI rationale explaining exactly what was flagged.
+    // Routing contract:
+    //   hash_tampered — cryptographic proof the file was edited after issuance.
+    //                   Citizen sees "resubmit the original"; officer gets the full
+    //                   AI rationale (fraud signal path).
+    //   invalid       — wrong document type: bounced to citizen with exact ask.
+    //   mismatch / suspicious / tampered — field/vision fraud signals: escalated
+    //                   to officer; citizen never auto-rejected for authenticity.
+    const hashTampered = documentUploaded && verdict === 'hash_tampered'
     const wrongType = documentUploaded && verdict === 'invalid'
-    const fraudSignal = documentUploaded && ['mismatch', 'suspicious', 'tampered'].includes(verdict)
+    const fraudSignal = documentUploaded && ['mismatch', 'suspicious', 'tampered', 'hash_tampered'].includes(verdict)
     const accepted = documentUploaded && !wrongType // present & right type (fraud still proceeds)
 
     // ── Two-document completeness ────────────────────────────────────────────────
@@ -287,7 +290,7 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
     } else {
       // stage === 'primary'
       const primaryAccepted = documentUploaded && primaryVerdict !== 'invalid'
-      const primaryFraud = primaryAccepted && ['mismatch', 'suspicious', 'tampered'].includes(primaryVerdict)
+      const primaryFraud = primaryAccepted && ['mismatch', 'suspicious', 'tampered', 'hash_tampered'].includes(primaryVerdict)
 
       if (!primaryAccepted) {
         complete = false
@@ -327,7 +330,9 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
     }
 
     // Specific, citizen-facing reason when we bounce the file back for re-submission.
-    const resubmitReason = wrongType
+    const resubmitReason = hashTampered
+      ? 'This document has been modified from its original. Please resubmit the original, unedited document.'
+      : wrongType
       ? (supportingReport && supportingReport.verdict === 'invalid'
         ? `The uploaded supporting document does not appear to be a ${DOC_TYPE_PROFILES[required.supporting!.type].label}. Please upload: ${owedDoc?.label ?? required.supporting!.label}.`
         : `The uploaded file does not appear to be a ${profile.label}. Please upload: ${owedDoc?.label ?? required.primary.label}.`)
@@ -336,10 +341,9 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
     const authenticity: DocAuthenticity = verdict
     const authorityName = verificationReport.authorityName
     const authoritySalary = verificationReport.authoritySalary
-    // Citizen-facing reason: the specific resubmit message when bouncing the file back;
-    // otherwise the verification summary (used by the Critic when it escalates — this is
-    // the AI rationale both the officer and the citizen see).
-    const authorityReason = wrongType ? resubmitReason : verificationReport.summary
+    // Citizen-facing reason: hash_tampered + wrong-type get the resubmit message;
+    // everything else uses the verification summary (Critic escalation rationale).
+    const authorityReason = (hashTampered || wrongType) ? resubmitReason : verificationReport.summary
     const salaryMismatch = authenticity === 'mismatch'
 
     const primaryDone = stage === 'supporting' || accepted
@@ -357,6 +361,8 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
       : `⚠ ${authenticity} (${verificationReport.confidenceScore}%)`
     const stateLabel = !documentUploaded
       ? `${stage === 'supporting' ? 'Supporting document' : 'Documents'} required (${expectedType})`
+      : hashTampered
+      ? 'Resubmit required — document modified (hash mismatch)'
       : wrongType
       ? (supportingReport && supportingReport.verdict === 'invalid' ? `Resubmit required — not a ${DOC_TYPE_PROFILES[required.supporting!.type].label}` : `Resubmit required — not a ${profile.label}`)
       : stage === 'primary' && !complete

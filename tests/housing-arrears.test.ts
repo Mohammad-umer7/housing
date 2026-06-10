@@ -189,10 +189,11 @@ describe('calculateReschedulingPlan', () => {
     expect(plan.durationMonths).toBe(13)
   })
 
-  test('deferArrears spreads arrears thinly over the full term (TRANSFER_ARREARS)', () => {
+  test('deferArrears moves arrears to end with zero monthly add (TRANSFER_ARREARS)', () => {
     const plan = calculateReschedulingPlan(24000, 12000, 180, 0, 0.2, { deferArrears: true })
     expect(plan.planType).toBe('TRANSFER_ARREARS')
-    expect(plan.monthlyPayment).toBe(134) // ceil(24000/180) — the smallest monthly add
+    expect(plan.monthlyPayment).toBe(0)   // assessment matrix: no increase to monthly installment
+    expect(plan.arrearsPremium).toBe(0)
     expect(plan.withinLoanPeriod).toBe(true)
   })
 })

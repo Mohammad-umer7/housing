@@ -15,6 +15,7 @@ import { requireAuth, checkRateLimit } from '@/lib/middleware/auth'
 import { successResponse, errorResponse } from '@/lib/api-response'
 import { extractTextFromPDF, extractDocumentFields } from '@/lib/pdf-extractor'
 import { checkStructure, checkArithmetic, extractEmiratesId, extractIban, extractAccountNumber } from '@/lib/document-forensics'
+import { checkHashIntegrity } from '@/lib/doc-hash-verify'
 import { classifyRequestCircumstances, determineRequiredDocuments } from '@/governance/housing-arrears'
 
 const sanitize = (s: unknown) => String(s ?? '').replace(/<[^>]*>/g, '').trim()
@@ -186,6 +187,10 @@ export async function POST(req: NextRequest) {
       pdfExtractedAccount = extractAccountNumber(extractedPdfText)
     }
 
+    // Cryptographic hash integrity — detects any text modification after issuance.
+    // Only fires when the document embeds a CryptoSignatureToken (see lib/doc-hash-verify.ts).
+    const pdfHashIntegrity = extractedPdfText ? checkHashIntegrity(extractedPdfText) : null
+
     const supportingDocUploaded = !!supportingDocFile
     let pdfSupportingExtractedFields = null
     let pdfSupportingStructure = null
@@ -244,6 +249,7 @@ export async function POST(req: NextRequest) {
       pdfExtractedIban,
       pdfExtractedAccount,
       pdfBase64,
+      pdfHashIntegrity,
       // Two-document round-trip — when set, the Document Agent trusts the prior salary-cert
       // validation and only validates the supporting document uploaded in this submission.
       salaryCertAlreadyValidated,

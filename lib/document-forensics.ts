@@ -161,6 +161,7 @@ export type VerificationVerdict =
   | 'verified'
   | 'mismatch'
   | 'suspicious'
+  | 'hash_tampered'
   | 'tampered'
   | 'invalid'
   | 'unverifiable'
@@ -300,10 +301,12 @@ export type ForensicInputs = {
   // deterministic layers).
   vision?: VisionAssessment | null
   validatedSalaryCertDate?: string | null
+  // Cryptographic hash integrity check (null = no token found in document → skipped).
+  hashIntegrity?: { hasToken: boolean; hashMatch: boolean; storedHash: string | null; computedHash: string | null } | null
 }
 
 export function buildVerificationReport(input: ForensicInputs): VerificationReport {
-  const { expectedType, record, declaredSalary, extracted, structure, arithmetic, vision, validatedSalaryCertDate } = input
+  const { expectedType, record, declaredSalary, extracted, structure, arithmetic, vision, validatedSalaryCertDate, hashIntegrity } = input
   const profile = DOC_TYPE_PROFILES[expectedType]
   const checks: VerificationCheck[] = []
   const visionSuspicious = !!vision && (vision.verdict === 'suspicious' || vision.verdict === 'likely_fake')
@@ -501,6 +504,26 @@ export function buildVerificationReport(input: ForensicInputs): VerificationRepo
     weight: 10,
   })
 
+  // 5b: cryptographic hash integrity — SHA-256 of the document text vs the embedded
+  // CryptoSignatureToken. A mismatch is mathematical proof the file was edited after
+  // issuance. Only evaluated when the document embeds the token (hasToken=true).
+  const hashTamperedFail = !!hashIntegrity && hashIntegrity.hasToken && !hashIntegrity.hashMatch
+  checks.push({
+    id: 'hash_integrity',
+    label: 'Cryptographic document hash matches embedded token',
+    status: !hashIntegrity || !hashIntegrity.hasToken
+      ? 'na'
+      : hashIntegrity.hashMatch
+      ? 'pass'
+      : 'fail',
+    detail: !hashIntegrity || !hashIntegrity.hasToken
+      ? 'No cryptographic token found in document — hash verification skipped.'
+      : hashIntegrity.hashMatch
+      ? `Document content matches the embedded cryptographic token (SHA-256 verified).`
+      : `Document content does not match the embedded token — the file has been modified since issuance. Stored: ${hashIntegrity.storedHash?.slice(0, 16)}... Computed: ${hashIntegrity.computedHash?.slice(0, 16)}...`,
+    weight: 30,
+  })
+
   // 6: vision-LLM authenticity — the knowledge-based "does this look genuinely issued"
   // layer. Catches a fabricated file that passes the field/anchor checks (e.g. only the
   // wanted values, no real content). Stamps/signatures are ignored by design.
@@ -570,7 +593,8 @@ export function buildVerificationReport(input: ForensicInputs): VerificationRepo
   //    citizen as a resubmit. Vision suspicion also outranks a clean field match,
   //    because a fabricated file can carry the exact "wanted" values.
   let verdict: VerificationVerdict
-  if (visionSuspicious) verdict = 'suspicious'
+  if (hashTamperedFail) verdict = 'hash_tampered'           // cryptographic proof — highest precedence
+  else if (visionSuspicious) verdict = 'suspicious'
   else if (wrongType) verdict = 'invalid'
   else if (salaryMismatch || eidMatch === false || nameMatch === false || employerMatch === false || accountMismatch || !dateChronologyPass) verdict = 'mismatch'
   else if (profile.salaryBearing && !recordValid) verdict = 'unverifiable'
@@ -579,7 +603,9 @@ export function buildVerificationReport(input: ForensicInputs): VerificationRepo
 
   const failing = checks.filter((c) => c.status === 'fail').map((c) => c.label)
   const summary =
-    verdict === 'verified'
+    verdict === 'hash_tampered'
+      ? 'This document has been modified from its original. The cryptographic token embedded at issuance does not match the current content — please resubmit the original, unedited document.'
+      : verdict === 'verified'
       ? `The ${profile.label} validated against the issuing authority with ${confidenceScore}% confidence.`
       : verdict === 'invalid'
       ? `The uploaded file is not the requested ${profile.label}${

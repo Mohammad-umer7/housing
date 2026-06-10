@@ -411,6 +411,28 @@ export function calculateReschedulingPlan(
   opts: { deferArrears?: boolean; rules?: ActiveRules } = {}
 ): ReschedulePlan {
   const cap = (opts.rules ?? OFFICIAL_MOEI_RULES).MAX_DEDUCTION_PERCENT
+
+  // Brief Assessment Matrix — unemployment / temporary circumstances: move the arrears
+  // to the END of the repayment period WITHOUT increasing the current monthly installment.
+  // The loan term is extended by the months needed to clear arrears at the existing rate.
+  // This path runs BEFORE the G-03 headroom check — adding zero premium is always within
+  // the 20% ceiling regardless of salary (including salary = 0 for unemployment cases).
+  if (opts.deferArrears && remainingLoanMonths > 0) {
+    const durationMonths = currentInstallment > 0
+      ? Math.ceil(arrears / currentInstallment)
+      : remainingLoanMonths  // edge case: no prior installment, use remaining term
+    return {
+      arrearsPremium: 0,
+      monthlyPayment: 0,
+      durationMonths,
+      totalDeduction: currentInstallment,
+      deductionRate: salary > 0 ? currentInstallment / salary : 0,
+      withinLoanPeriod: true,  // term extension is the explicit policy for these cases
+      twentyPercentRulePass: true,
+      planType: 'TRANSFER_ARREARS',
+    }
+  }
+
   const headroom20 = Math.round(cap * salary) - currentInstallment // max premium under the 20% ceiling
   const twentyPercentRulePass = headroom20 > 0
 
@@ -429,26 +451,6 @@ export function calculateReschedulingPlan(
 
   let arrearsPremium: number
   let durationMonths: number
-  if (opts.deferArrears && remainingLoanMonths > 0) {
-    // Brief Assessment Matrix — unemployment / temporary circumstances: move the
-    // arrears to the end of the repayment period with the SMALLEST possible monthly
-    // increase (spread thinly across the full remaining term), never above the 20%
-    // headroom. This is the TRANSFER_ARREARS deferral, not an installment hike.
-    const minPremium = Math.max(1, Math.ceil(arrears / remainingLoanMonths))
-    arrearsPremium = Math.min(minPremium, headroom20)
-    durationMonths = Math.ceil(arrears / arrearsPremium)
-    const totalDeductionD = currentInstallment + arrearsPremium
-    return {
-      arrearsPremium,
-      monthlyPayment: arrearsPremium,
-      durationMonths,
-      totalDeduction: totalDeductionD,
-      deductionRate: salary > 0 ? totalDeductionD / salary : 1,
-      withinLoanPeriod: durationMonths <= remainingLoanMonths,
-      twentyPercentRulePass: true,
-      planType: 'TRANSFER_ARREARS',
-    }
-  }
 
   // Preferred (possibly lighter) premium at the target rate; fall back to the full
   // 20% headroom if the lighter premium can't clear the arrears within the term.
@@ -530,7 +532,10 @@ export function analyzeFinancials(
 
   const monthly_capacity = Math.max(0, salary - expenses - proposed_total_deduction)
   const debt_to_income_ratio = computeDebtToIncomeRatio(current_installment, expenses, salary)
-  const dbr = salary > 0 ? proposed_total_deduction / salary : 1
+  // DBR = total obligations (other debts + proposed housing deduction) / salary — CBUAE Article 7.
+  // Using the full obligations ratio, not just this loan, matches the brief's assessment matrix:
+  // "Total obligations compared with total income through system linkage or financial data."
+  const dbr = salary > 0 ? (expenses + proposed_total_deduction) / salary : 1
   const dbr_cap = dbrCapFor(is_retiree)
 
   const risk_score = computeRiskScore({
@@ -608,10 +613,31 @@ export function applyGovernanceRules(
   const ratePct = Math.round(financials.proposed_deduction_rate * 100)
 
   if (base.decision === 'APPROVED') {
-    const lighter = financials.is_hardship ? ' (lighter plan applied for a hardship household)' : ''
+    // DBR ceiling: total obligations (other debts + proposed deduction) exceed the CBUAE/SZHP
+    // cap → reduce the increase, maintain the installment, or refer for human review.
+    // Only applies to non-deferral cases (deferral adds 0 premium so DBR is unchanged).
+    if (!financials.dbr_within_limit && !financials.arrears_deferred) {
+      const totalPct = Math.round(financials.dbr * 100)
+      const capPct = Math.round(financials.dbr_cap * 100)
+      return {
+        decision: 'ESCALATED',
+        reason: `Total financial obligations (${totalPct}% of salary including existing debts and proposed deduction) exceed the ${capPct}% DBR ceiling — officer review required to reduce the installment increase or maintain the current installment.`,
+        rule_triggered: 'G-07: DBR Ceiling — Total obligations exceed CBUAE/SZHP limit',
+        financial_analysis: financials,
+      }
+    }
+
+    let approvedReason: string
+    if (financials.arrears_deferred) {
+      const circumstance = financials.unemployment ? 'Unemployment' : 'Temporary circumstance'
+      approvedReason = `All rules satisfied. ${circumstance} — arrears of AED ${arrears.toLocaleString()} deferred to the end of the loan term. Monthly installment remains unchanged at AED ${financials.current_installment.toLocaleString()}. Loan extends by approximately ${financials.proposed_duration} months (plan: TRANSFER_ARREARS).`
+    } else {
+      const lighter = financials.is_hardship ? ' (lighter plan applied for a hardship household)' : ''
+      approvedReason = `All rules satisfied. Proposed deduction rate: ${ratePct}% of AED ${salary.toLocaleString()} salary${lighter} — total monthly deduction AED ${financials.proposed_total_deduction.toLocaleString()} (existing installment AED ${financials.current_installment.toLocaleString()} + arrears premium AED ${financials.arrears_premium.toLocaleString()}). Arrears of AED ${arrears.toLocaleString()} clear over ${financials.proposed_duration} months (plan: ${financials.plan_type}). Within the 20% rule and the loan period.`
+    }
     return {
       decision: 'APPROVED',
-      reason: `All rules satisfied. Proposed deduction rate: ${ratePct}% of AED ${salary.toLocaleString()} salary${lighter} — total monthly deduction AED ${financials.proposed_total_deduction.toLocaleString()} (existing installment AED ${financials.current_installment.toLocaleString()} + arrears premium AED ${financials.arrears_premium.toLocaleString()}). Arrears of AED ${arrears.toLocaleString()} clear over ${financials.proposed_duration} months (plan: ${financials.plan_type}). Within the 20% rule and the loan period.`,
+      reason: approvedReason,
       rule_triggered: 'Rules G-00 through G-05: All passed — Clean Approval',
       financial_analysis: financials,
     }
