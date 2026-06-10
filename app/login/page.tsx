@@ -93,15 +93,16 @@ export default function LoginPage() {
     }
   }
 
-  async function handleOffSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  async function performLogin(role: 'officer' | 'admin') {
     setBusy(true)
     setErrorMsg('')
     try {
+      const username = role === 'officer' ? 'officer' : 'admin'
+      const password = 'saddad-2026'
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: offUser.trim(), password: offPass }),
+        body: JSON.stringify({ username, password }),
       })
       const data = await res.json()
       if (!res.ok || !data.success) {
@@ -110,7 +111,7 @@ export default function LoginPage() {
         return
       }
       sessionStorage.setItem('saddad_logged_in', 'true')
-      router.push(data.data?.role === 'admin' ? '/admin' : '/officer')
+      router.push(role === 'admin' ? '/admin' : '/officer')
       router.refresh()
     } catch {
       setErrorMsg('Could not reach the sign-in service.')
@@ -154,14 +155,19 @@ export default function LoginPage() {
         <a className="what-is-link" onClick={() => setActiveModal('whatis')}>
           {t('What is UAE PASS?')}
         </a>
+        {errorMsg && !activeModal && (
+          <div style={{ color: 'var(--red)', fontSize: 13, fontWeight: 600, background: 'var(--red-soft)', padding: '8px 12px', borderRadius: 'var(--r)', border: '1px solid rgba(200, 16, 46, 0.15)', marginTop: 16, maxWidth: 320, textAlign: 'center' }}>
+            {errorMsg}
+          </div>
+        )}
       </div>
 
       <div className="staff-btn-row">
-        <button className="officer-btn" onClick={() => setActiveModal('officer')}>
-          {t('Continue as an Officer')}
+        <button className="officer-btn" onClick={() => performLogin('officer')} disabled={busy}>
+          {busy ? t('Logging in…') : t('Continue as an Officer')}
         </button>
-        <button className="officer-btn" onClick={() => setActiveModal('admin')}>
-          {t('Continue as an Admin')}
+        <button className="officer-btn" onClick={() => performLogin('admin')} disabled={busy}>
+          {busy ? t('Logging in…') : t('Continue as an Admin')}
         </button>
       </div>
 
@@ -267,49 +273,7 @@ export default function LoginPage() {
         </div>
       )}
 
-      {/* OFFICER / ADMIN LOGIN MODALS */}
-      {(activeModal === 'officer' || activeModal === 'admin') && (
-        <div className="modal-backdrop" onClick={closeModal}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={closeModal}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
-            </button>
-            <div className="modal-title">
-              {activeModal === 'officer'
-                ? <Ico.shield width={20} height={20} style={{ color: 'var(--gold)', marginRight: 8, flexShrink: 0 }} />
-                : <Ico.building width={20} height={20} style={{ color: 'var(--gold)', marginRight: 8, flexShrink: 0 }} />}
-              {activeModal === 'officer' ? t('Officer Login') : t('Admin Login')}
-            </div>
-            <form className="modal-form" onSubmit={handleOffSubmit}>
-              <button
-                type="button"
-                onClick={() => { setOffUser(activeModal === 'officer' ? 'officer' : 'admin'); setOffPass('saddad-2026') }}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', padding: '8px 12px', marginBottom: 4, background: 'rgba(194,161,78,0.08)', border: '1px dashed rgba(194,161,78,0.5)', borderRadius: 'var(--r)', fontSize: 12.5, color: 'var(--gold-dark)', fontWeight: 600, cursor: 'pointer' }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M14 12H3"/></svg>
-                Fill demo credentials
-              </button>
-              <div className="field">
-                <label>{activeModal === 'officer' ? t('Officer Username / ID') : t('Admin Username / ID')}</label>
-                <input type="text" className="input" required placeholder={activeModal === 'officer' ? 'e.g. officer' : 'e.g. admin'} value={offUser} onChange={(e) => setOffUser(e.target.value)} />
-              </div>
-              <div className="field">
-                <label>{t('Password')}</label>
-                <input type="password" className="input" required placeholder="••••••••" value={offPass} onChange={(e) => setOffPass(e.target.value)} />
-              </div>
-              {errorMsg && (
-                <div style={{ color: 'var(--red)', fontSize: 13, fontWeight: 600, background: 'var(--red-soft)', padding: '10px 14px', borderRadius: 'var(--r)', border: '1px solid rgba(200, 16, 46, 0.15)' }}>
-                  {errorMsg}
-                </div>
-              )}
-              <div className="modal-actions">
-                <button type="button" className="btn btn-neutral" onClick={closeModal}>{t('Cancel')}</button>
-                <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? t('Logging in…') : t('Log In')}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+
 
       {/* WHAT IS UAE PASS MODAL */}
       {activeModal === 'whatis' && (
