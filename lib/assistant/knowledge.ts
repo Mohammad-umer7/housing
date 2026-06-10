@@ -93,6 +93,14 @@ function caseContextBlock(ctx?: AssistantCaseContext | null): string {
     ctx.durationMonths != null ? `- Proposed duration: ${ctx.durationMonths} months` : '',
     ctx.rationale ? `- Reasoning on record: ${ctx.rationale}` : '',
   ].filter(Boolean)
+  if (ctx.fullName) {
+    // The beneficiary is already signed in and identified — don't make them re-introduce
+    // themselves or hand over an Application ID we already have.
+    lines.push(
+      `This is the signed-in beneficiary. Greet them by their first name and answer directly. ` +
+        `Do NOT ask them to provide or confirm their Application ID, name, or Emirates ID — you already have their identity above.`,
+    )
+  }
   return lines.join('\n')
 }
 

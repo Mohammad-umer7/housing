@@ -46,11 +46,13 @@ export default function RootLayout({
         <TTSProvider>
           <AccessibilityProvider>
             <SignLanguageProvider>
-              <div id="a11y-root">
-                {children}
-                <SignLanguageWidget />
-                <AssistantWidget />
-              </div>
+              {/* #a11y-root carries the accessibility CSS filter (saturate/colour-blind) and
+                  zoom. A filter creates a containing block, which would trap position:fixed
+                  descendants — so the floating widgets live OUTSIDE it (still inside the
+                  providers) to stay pinned to the viewport while the page scrolls. */}
+              <div id="a11y-root">{children}</div>
+              <SignLanguageWidget />
+              <AssistantWidget />
             </SignLanguageProvider>
           </AccessibilityProvider>
         </TTSProvider>

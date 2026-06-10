@@ -3,7 +3,7 @@
 import { useEffect, useState, Fragment } from 'react'
 import Link from 'next/link'
 import { useTTS } from '@/lib/tts'
-import { Ico } from '@/components/saddad-ui'
+import { Ico, BrandMark } from '@/components/saddad-ui'
 import { useA11y } from '@/components/AccessibilityProvider'
 
 function SpeakerButton({ text, lang }: { text: string; lang: 'en' | 'ar' }) {
@@ -113,7 +113,7 @@ export default function OfficerPage() {
       <div className="officer-top">
         <div className="gov-rule" />
         <div className="officer-top-inner">
-          <div className="officer-brand"><Ico.shield /> {t('Officer Portal')}</div>
+          <div className="officer-brand"><BrandMark height={30} /> {t('Officer Portal')}</div>
           <div className="internal-tag">{t('Internal Use Only')} <span className="ar">— وزارة الطاقة والبنية التحتية</span></div>
           <div className="officer-links">
             {/* The operations dashboard moved to the Admin portal (/admin). */}

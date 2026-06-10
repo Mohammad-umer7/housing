@@ -137,9 +137,6 @@ export function SignLanguageWidget() {
     left: 24,
     bottom: 24,
     zIndex: 10050,
-    width: 58,
-    height: 58,
-    borderRadius: 999,
   }
   const panelStyle: React.CSSProperties = {
     position: 'fixed',
@@ -168,7 +165,8 @@ export function SignLanguageWidget() {
           aria-label={`${t('Open sign language help')} - ${label}`}
           title={t('Open sign language help')}
         >
-          <Hand size={26} aria-hidden="true" />
+          <Hand size={22} aria-hidden="true" />
+          <span className="fab-label">{t('Sign Guide', 'دليل الإشارة')}</span>
         </button>
       )}
 

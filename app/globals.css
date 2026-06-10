@@ -162,6 +162,11 @@ a:hover { color: var(--gold-dark); }
 .nav-logout { color: var(--muted); }
 .nav-logout:hover { color: var(--red); background: var(--red-soft); }
 
+/* Brand lockup at the head of the citizen nav (logo + SADDAD wordmark). */
+.gov-brand { display: flex; align-items: center; gap: 10px; flex: none; padding-inline-end: 14px; margin-inline-end: 6px; }
+.gov-brand-name { font-family: var(--font); font-weight: 800; font-size: 17px; letter-spacing: .04em; color: var(--ink-navy); }
+.gov-brand-name .ar { font-family: var(--font-ar); font-weight: 700; letter-spacing: 0; color: var(--gold-dark); }
+
 /* ============================================================
    PAGE / LAYOUT
    ============================================================ */
@@ -461,8 +466,8 @@ table.cases tr:hover td { background: var(--cream-soft); }
 .fb-card .when { color: var(--faint); font-size: 13.5px; }
 .fb-card .txt { color: var(--body); margin-top: 14px; }
 
-/* Emblem placeholder crest */
-.crest-circle { width: 56px; height: 56px; border-radius: 999px; border: 1.5px solid var(--gold-line); display: grid; place-items: center; }
+/* Circular backing for the brand mark when used as a standalone crest. */
+.crest-circle { width: 56px; height: 56px; border-radius: 999px; border: 1.5px solid var(--gold-line); display: grid; place-items: center; overflow: hidden; }
 
 /* misc */
 .muted { color: var(--muted); }
@@ -1659,18 +1664,20 @@ html.high-contrast *:focus-visible {
   bottom: 24px;
   left: 24px;
   z-index: 90;
-  width: 58px;
-  height: 58px;
+  height: 52px;
+  padding: 0 22px 0 17px;
   border-radius: 999px;
   border: none;
   cursor: pointer;
   background: var(--ink-navy);
   color: #ffffff;
-  display: grid;
-  place-items: center;
-  box-shadow: var(--shadow-lg);
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  box-shadow: var(--shadow-lg), inset 0 0 0 1.5px rgba(255, 255, 255, .14);
   transition: background .16s, transform .16s;
 }
+.sign-fab svg { flex: none; }
 .sign-fab:hover {
   background: var(--gold-dark);
   transform: translateY(-2px);
@@ -1793,8 +1800,7 @@ html.high-contrast *:focus-visible {
   .sign-fab {
     bottom: 16px;
     left: 16px;
-    width: 54px;
-    height: 54px;
+    height: 48px;
   }
 
   .sign-panel {
@@ -1810,11 +1816,18 @@ html.high-contrast *:focus-visible {
    ============================================================ */
 .assistant-fab {
   position: fixed; bottom: 26px; inset-inline-end: 26px; z-index: 90;
-  width: 58px; height: 58px; border-radius: 999px; border: none; cursor: pointer;
-  background: var(--gold); color: #fff; display: grid; place-items: center;
-  box-shadow: var(--shadow-lg); transition: .16s;
+  height: 52px; padding: 0 22px 0 17px; border-radius: 999px; border: none; cursor: pointer;
+  background: var(--gold); color: #fff;
+  display: inline-flex; align-items: center; gap: 9px;
+  box-shadow: var(--shadow-lg), inset 0 0 0 1.5px rgba(255, 255, 255, .45);
+  transition: background .16s, transform .16s;
 }
 .assistant-fab:hover { background: var(--gold-dark); transform: translateY(-2px); }
+.assistant-fab svg { flex: none; }
+
+/* Shared label for the floating pill buttons (Ask SADDAD / Sign Guide). */
+.fab-label { font-family: var(--font); font-size: 15px; font-weight: 800; letter-spacing: .01em; white-space: nowrap; }
+html[lang="ar"] .fab-label { font-family: var(--font-ar); }
 
 .assistant-panel {
   position: fixed; bottom: 26px; inset-inline-end: 26px; z-index: 95;

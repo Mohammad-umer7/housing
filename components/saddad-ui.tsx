@@ -4,8 +4,13 @@
 // (Ico icon set, Emblem crest, GovHeader/GovFooter, DataHead, Field). Presentational only.
 
 import React from 'react'
+import Image from 'next/image'
 import { useTTS } from '@/lib/tts'
 import { useA11y } from '@/components/AccessibilityProvider'
+
+// SADDAD / MOEI brand mark. Source PNG is 596×654; keep that ratio so headers and the
+// login crest never distort it. Served from public/agent-logo.png.
+const LOGO_RATIO = 596 / 654
 
 type SVGP = React.SVGProps<SVGSVGElement>
 
@@ -46,19 +51,30 @@ export const Ico = {
   doc2: (p: SVGP) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...p}><path d="M14 3v4a1 1 0 0 0 1 1h4" /><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z" /></svg>,
 }
 
-// UAE emblem — placeholder federal crest (gold falcon), ported verbatim.
-export function Emblem({ size = 54, transparent = false }: { size?: number; transparent?: boolean }) {
+// The SADDAD logo, rendered at a target pixel height. Width is derived from LOGO_RATIO so
+// the mark keeps its aspect ratio; `priority` because it sits in the page chrome / above the fold.
+export function BrandMark({ height = 30, className }: { height?: number; className?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 64 64" fill="none" aria-label="UAE emblem">
-      {!transparent && <circle cx="32" cy="32" r="31" fill="#fff" stroke="var(--gold-line)" strokeWidth="1.5" />}
-      <g fill="var(--gold)">
-        <path d="M32 14c-2.4 0-3.8 1.8-3.8 1.8s-2.6-.6-4.6.8c1 .2 1.6.8 1.6.8-2.8.4-4.4 2.6-4.4 2.6 1.2-.4 2.2-.2 2.2-.2-2.6 1.8-3 4.6-3 4.6 1-.8 2-1 2-1-1.4 2.2-1 4.8-1 4.8.8-1 1.8-1.4 1.8-1.4-.2 1.2.2 2.2.2 2.2.4-.8 1-1.2 1-1.2.2 2 1.6 3.4 1.6 3.4l-2.4 8.2h4l1.8-6 1.8 6h4l-2.4-8.2s1.4-1.4 1.6-3.4c0 0 .6.4 1 1.2 0 0 .4-1 .2-2.2 0 0 1 .4 1.8 1.4 0 0 .4-2.6-1-4.8 0 0 1 .2 2 1 0 0-.4-2.8-3-4.6 0 0 1-.2 2.2.2 0 0-1.6-2.2-4.4-2.6 0 0 .6-.6 1.6-.8-2-1.4-4.6-.8-4.6-.8S34.4 14 32 14z" />
-      </g>
-      <g stroke="var(--gold)" strokeWidth="1.4">
-        <path d="M20 48h24" strokeLinecap="round" />
-        <path d="M23 51h18" strokeLinecap="round" opacity=".7" />
-      </g>
-    </svg>
+    <Image
+      src="/agent-logo.png"
+      alt="SADDAD — Ministry of Energy and Infrastructure"
+      className={className}
+      width={Math.round(height * LOGO_RATIO)}
+      height={height}
+      priority
+      style={{ height, width: 'auto' }}
+    />
+  )
+}
+
+// Login / landing crest. `transparent` keeps it bare (the login card already frames it in a
+// gold ring); otherwise it gets the circular crest backing used elsewhere.
+export function Emblem({ size = 54, transparent = false }: { size?: number; transparent?: boolean }) {
+  if (transparent) return <BrandMark height={size} />
+  return (
+    <span className="crest-circle" style={{ width: size + 14, height: size + 14 }}>
+      <BrandMark height={size} />
+    </span>
   )
 }
 
@@ -88,6 +104,10 @@ export function GovHeader({
       <div className="gov-rule" />
       <nav className="gov-nav">
         <div className="gov-nav-inner">
+          <span className="gov-brand">
+            <BrandMark height={30} />
+            <span className="gov-brand-name">SADDAD<span className="ar"> · سدّد</span></span>
+          </span>
           {tabs.map((tab) => {
             const I = tab.icon
             return (

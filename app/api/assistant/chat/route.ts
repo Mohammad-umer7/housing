@@ -3,6 +3,7 @@ import { runAssistant, type ChatMessage } from '@/lib/assistant/chat'
 import type { AssistantCaseContext, AssistantStatsContext, AudiencePortal } from '@/lib/assistant/knowledge'
 import { readSessionFromCookieHeader } from '@/lib/auth/session'
 import { getCaseByCaseNumber, getJobStatus, getCaseStats, getSystemSetting } from '@/lib/data-layer'
+import { getApplicant } from '@/lib/integrations/source-systems'
 import { supabaseAdmin } from '@/lib/supabase'
 import { checkRateLimit } from '@/lib/middleware/auth'
 import { successResponse, errorResponse } from '@/lib/api-response'
@@ -50,6 +51,19 @@ export async function POST(req: NextRequest) {
   // Build case context from authorized records (best-effort — never blocks the reply).
   let caseContext: AssistantCaseContext | null = null
   if (authorizedCaseNumber) {
+    // For the citizen, resolve their identity from the beneficiary registry so the
+    // assistant greets them by name and never asks for an Application ID it already
+    // holds — even before they have submitted a rescheduling request. Officer/admin
+    // tones are deliberately left unchanged (no identity lookup, same context shape).
+    let fullName: string | null = null
+    if (audience === 'citizen') {
+      try {
+        const applicant = await getApplicant(authorizedCaseNumber)
+        fullName = (applicant as { full_name?: string | null } | null)?.full_name ?? null
+      } catch (err) {
+        console.error('[assistant] applicant lookup failed:', err)
+      }
+    }
     try {
       const [caseRow, job] = await Promise.all([
         getCaseByCaseNumber(authorizedCaseNumber),
@@ -59,6 +73,7 @@ export async function POST(req: NextRequest) {
         const terminal = TERMINAL.includes(caseRow.status)
         caseContext = {
           caseNumber: authorizedCaseNumber,
+          fullName,
           status: job?.status ?? caseRow.status ?? null,
           decision: terminal ? caseRow.status : null,
           monthlyPayment: terminal ? caseRow.monthly_payment ?? null : null,
@@ -66,10 +81,18 @@ export async function POST(req: NextRequest) {
           rationale: terminal ? caseRow.decision_reason ?? null : null,
         }
       } else {
-        caseContext = { caseNumber: authorizedCaseNumber, status: 'not found' }
+        // A known beneficiary with no case row simply has not applied yet — say so
+        // plainly instead of "not found", which reads as an error to the model.
+        caseContext = {
+          caseNumber: authorizedCaseNumber,
+          fullName,
+          status: fullName ? 'no rescheduling request submitted yet' : 'not found',
+        }
       }
     } catch (err) {
       console.error('[assistant] case lookup failed:', err)
+      // Keep the resolved identity even if the case/job lookup failed.
+      if (fullName) caseContext = { caseNumber: authorizedCaseNumber, fullName, status: null }
     }
   }
 

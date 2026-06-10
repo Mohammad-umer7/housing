@@ -142,10 +142,11 @@ function AssistantChat({ chatRole, staffCase, citizenCase }: {
     <>
       {!open && (
         <button className="assistant-fab" onClick={() => setOpen(true)} aria-label={t('Open the SADDAD assistant')}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" width="26" height="26">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" width="22" height="22">
             <path d="M21 12a8 8 0 0 1-8 8H4l2.4-2.4A8 8 0 1 1 21 12z" />
             <path d="M8.5 10.5h.01M12 10.5h.01M15.5 10.5h.01" strokeWidth="2.6" strokeLinecap="round" />
           </svg>
+          <span className="fab-label">{t('Ask SADDAD', 'اسأل سدّد')}</span>
         </button>
       )}
 

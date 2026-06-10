@@ -6,7 +6,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { Ico } from '@/components/saddad-ui'
+import { Ico, BrandMark } from '@/components/saddad-ui'
 import { useA11y } from '@/components/AccessibilityProvider'
 
 const TABS = [
@@ -39,7 +39,7 @@ export default function AdminHeader({ username }: { username: string }) {
     <div className="officer-top">
       <div className="gov-rule" />
       <div className="officer-top-inner">
-        <div className="officer-brand"><Ico.building /> {t('Admin Portal', 'بوابة الإدارة')}</div>
+        <div className="officer-brand"><BrandMark height={30} /> {t('Admin Portal', 'بوابة الإدارة')}</div>
         <div className="internal-tag">{t('SADDAD Administration')} <span className="ar">— وزارة الطاقة والبنية التحتية</span></div>
         <div className="officer-links">
           {TABS.map((tab) => (
