@@ -229,6 +229,23 @@ export async function POST(req: NextRequest) {
       pdfSupportingExtractedAccount = extractAccountNumber(supportingExtractedText)
     }
 
+    // Build the unified attachedDocuments manifest now that pdfSupportingBase64 is resolved.
+    type AttachedDoc = { index: number; role: 'primary' | 'supporting' | 'additional'; filename: string; mimeType: string; base64: string; description: string; size: number }
+    const attachedDocuments: AttachedDoc[] = []
+    if (salaryCertFile && pdfBase64) {
+      attachedDocuments.push({ index: 0, role: 'primary', filename: salaryCertFile.name, mimeType: salaryCertFile.type || 'application/pdf', base64: pdfBase64, description: primaryDescription, size: salaryCertFile.size })
+    }
+    if (supportingDocFile && pdfSupportingBase64) {
+      attachedDocuments.push({ index: 1, role: 'supporting', filename: supportingDocFile.name, mimeType: supportingDocFile.type || 'application/pdf', base64: pdfSupportingBase64, description: supportingDescription, size: supportingDocFile.size })
+    }
+    for (let i = 0; i < extraFileEntries.length; i++) {
+      const { file, description } = extraFileEntries[i]
+      const buf = Buffer.from(await file.arrayBuffer())
+      if (buf.byteLength <= 5 * 1024 * 1024) {
+        attachedDocuments.push({ index: 2 + i, role: 'additional', filename: file.name, mimeType: file.type || 'application/octet-stream', base64: buf.toString('base64'), description, size: buf.byteLength })
+      }
+    }
+
     // Enrich the job payload with PDF extraction + forensic results. The raw extracted
     // text is intentionally NOT stored — it is fully consumed above (LLM fields +
     // structure/arithmetic/EID), and raw PDF text often contains NUL bytes that
