@@ -2,6 +2,8 @@
 
 **An 11-agent AI decision system for the UAE Ministry of Energy and Infrastructure** — built on **LangGraph + LangChain** — that turns the official **5-working-day** manual process into a **sub-10-second** auditable decision, and is architected as a template for the UAE Federal Government's 50% AI directive.
 
+### 🔗 Live demo: **https://housing-mocha.vercel.app/login**
+
 > **Track:** AI Agent for Rescheduling Housing Arrears (GovAI / MOEI Finance & Collections)
 
 ---
@@ -74,7 +76,11 @@ Built as a **LangGraph `StateGraph`** ([`agents/graph.ts`](agents/graph.ts)): ea
 
 ---
 
-## Quick start — try it locally
+## Quick start
+
+**Prefer to just click around?** The app is live at **https://housing-mocha.vercel.app/login** (use the one-click demo login).
+
+### Run it locally
 
 ```bash
 git clone https://github.com/your-org/housing-arrears-agent

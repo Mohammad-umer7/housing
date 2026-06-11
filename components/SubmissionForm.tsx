@@ -325,7 +325,6 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
       if (files.length === 0) { setSubmitError(`Please upload the required document: ${loanDetails.requiredDocLabel ?? 'a supporting document'}`); return }
     } else {
       if (loanDetails.requiresDocUpload && files.length === 0) { setSubmitError(`This case requires a document: ${loanDetails.requiredDocLabel}`); return }
-      if (!form.consent) { setSubmitError('You must agree to the 20% total salary-deduction ceiling to proceed.'); return }
       if (!certified) { setSubmitError('Please certify that the details provided are accurate.'); return }
       if (!(Number(form.monthly_salary) > 0)) { setSubmitError('Please enter a valid monthly salary greater than 0.'); return }
       if (!(Number(form.arrears_amount) > 0)) { setSubmitError('Please enter a valid amount due greater than 0.'); return }
@@ -867,17 +866,6 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
                 </div>
               </div>
 
-              {/* 20% deduction consent (functional gate) */}
-              {!needsDocuments && (
-                <label style={{ marginTop: 20, display: 'flex', gap: 10, alignItems: 'flex-start', cursor: 'pointer' }}>
-                  <input type="checkbox" style={{ marginTop: 4, transform: 'scale(1.2)' }} checked={form.consent} onChange={(e) => setForm(p => ({ ...p, consent: e.target.checked }))} />
-                  <span style={{ fontSize: 13.5, color: 'var(--body)' }}>
-                    I agree to a total monthly salary deduction capped at {DEDUCTION_CAP_PCT}% of my salary (≈ AED {deductionCeiling.toLocaleString()}/month) in accordance with the MOEI Terms and Conditions.
-                    <span className="ar" style={{ display: 'block', marginTop: 4, color: 'var(--muted)', fontSize: 12.5 }}>أوافق على خصم شهري بنسبة 20% من راتبي وفقاً لشروط الوزارة.</span>
-                  </span>
-                </label>
-              )}
-
               {/* Authenticity declaration */}
               <label style={{ marginTop: 16, display: 'flex', gap: 10, alignItems: 'flex-start', cursor: 'pointer' }}>
                 <input type="checkbox" style={{ marginTop: 4, transform: 'scale(1.2)' }} checked={certified} onChange={(e) => setCertified(e.target.checked)} />
@@ -890,7 +878,7 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
               <div style={{ display: 'flex', gap: 16, marginTop: 28 }}>
                 <button className="btn btn-neutral" style={{ flex: 1 }} onClick={prevStep}>Back / العودة</button>
                 <button className="btn btn-primary" style={{ flex: 2 }} onClick={handleSubmit}
-                  disabled={phase === 'submitting' || !certified || (!needsDocuments && !form.consent) || salaryInvalid || arrearsInvalid || (docRequired && files.length === 0)}>
+                  disabled={phase === 'submitting' || !certified || salaryInvalid || arrearsInvalid || (docRequired && files.length === 0)}>
                   {phase === 'submitting' ? t('Queuing Case…') : <>{t('Submit to SADDAD')} <Ico.chevR width={16} height={16} /></>}
                 </button>
               </div>

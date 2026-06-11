@@ -175,7 +175,7 @@ export async function extractDocumentFields(
 ): Promise<ExtractedDocFields> {
   const profile = DOC_TYPE_PROFILES[expectedType]
 
-  // ── Tier 1: OpenRouter LLM on the extracted text ──────────────────────────
+  // ── Tier 1: Groq LLM (→ OpenRouter fallback) on the extracted text ────────
   if (pdfText && pdfText.length >= 20 && isLLMConfigured()) {
     const fieldList = profile.fields.map((f) => `- ${f.key}: ${f.description}`).join('\n')
     const prompt = `Extract the following fields from this ${profile.label}. Use null for any field you cannot find (including any field not listed for this document type), and a confidence between 0 and 1.

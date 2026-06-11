@@ -46,7 +46,8 @@ type EscalatedCase = {
   priority_escalation: boolean | null
 }
 
-type ActionState = { caseNumber: string; action: 'APPROVE' | 'REJECT'; notes: string } | null
+type OfficerAction = 'APPROVE' | 'REJECT' | 'REQUEST_DOCS'
+type ActionState = { caseNumber: string; action: OfficerAction; notes: string; requestedDocs: string } | null
 
 type DocEntry = { index: number; role: 'primary' | 'supporting' | 'additional'; filename: string; mimeType: string; description: string; size: number }
 type DocManifest = { requestDescription: string | null; documents: DocEntry[] }
@@ -110,11 +111,30 @@ export default function OfficerPage() {
       const res = await fetch(`/api/officer/cases/${encodeURIComponent(actionState.caseNumber)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: actionState.action, officerNotes: actionState.notes }),
+        body: JSON.stringify({
+          action: actionState.action,
+          officerNotes: actionState.notes,
+          requestedDocuments: actionState.requestedDocs,
+        }),
       })
       const envelope = await res.json()
       if (!res.ok || !envelope.success) throw new Error(envelope.error || 'Action failed')
-      setSuccessMsg(`Case ${actionState.caseNumber} ${actionState.action.toLowerCase()}d successfully.`)
+      const verb =
+        actionState.action === 'APPROVE' ? 'approved'
+        : actionState.action === 'REJECT' ? 'rejected'
+        : 'returned to the applicant for additional documents'
+      // Surface whether the citizen notification actually went out (sandbox-aware path).
+      const n = envelope.data?.notification as
+        | { sent: boolean; channel: string; recipient: string | null; error?: string }
+        | undefined
+      const notifyMsg = !n
+        ? ''
+        : n.sent
+          ? ` Applicant notified via ${n.channel}${n.recipient ? ` (${n.recipient})` : ''}.`
+          : n.channel === 'disabled'
+            ? ' Notifications are disabled (NOTIFICATIONS_ENABLED=false) — message not sent.'
+            : ` ⚠ Applicant notification could not be delivered${n.error ? ` — ${n.error}` : ''}.`
+      setSuccessMsg(`Case ${actionState.caseNumber} ${verb}.${notifyMsg}`)
       setActionState(null)
       setLoading(true)
       await loadCases()
@@ -298,21 +318,37 @@ export default function OfficerPage() {
                     <div className="esc-actions">
                       {actionState?.caseNumber === c.case_number ? (
                         <div style={{ width: '100%' }}>
-                          <label className="muted" style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', display: 'block', marginBottom: 8 }}>Officer Notes for {actionState.action}</label>
+                          {actionState.action === 'REQUEST_DOCS' && (
+                            <>
+                              <label className="muted" style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', display: 'block', marginBottom: 8 }}>{t('Documents to request from the applicant')}</label>
+                              <input className="input" placeholder="e.g. updated salary certificate, bank statement for the last 3 months" style={{ marginBottom: 12, fontFamily: 'inherit' }}
+                                value={actionState.requestedDocs} onChange={e => setActionState(prev => prev ? { ...prev, requestedDocs: e.target.value } : null)} />
+                            </>
+                          )}
+                          <label className="muted" style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', display: 'block', marginBottom: 8 }}>
+                            {actionState.action === 'REQUEST_DOCS' ? t('Officer Notes (optional)') : `Officer Notes for ${actionState.action}`}
+                          </label>
                           <textarea className="input" rows={3} placeholder="Add notes for the audit log…" style={{ resize: 'vertical', fontFamily: 'inherit' }}
                             value={actionState.notes} onChange={e => setActionState(prev => prev ? { ...prev, notes: e.target.value } : null)} />
                           <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
-                            <button className={'btn ' + (actionState.action === 'APPROVE' ? 'btn-green' : 'btn-red')} onClick={submitAction} disabled={submitting}>
-                              {submitting ? 'Submitting…' : `Confirm ${actionState.action}`}
+                            <button
+                              className={'btn ' + (actionState.action === 'APPROVE' ? 'btn-green' : actionState.action === 'REJECT' ? 'btn-red' : 'btn-primary')}
+                              onClick={submitAction}
+                              disabled={submitting}
+                            >
+                              {submitting
+                                ? 'Submitting…'
+                                : actionState.action === 'REQUEST_DOCS' ? t('Send Document Request') : `Confirm ${actionState.action}`}
                             </button>
                             <button className="btn btn-neutral" onClick={() => setActionState(null)}>Cancel</button>
                           </div>
                         </div>
                       ) : (
                         <>
-                          <button className="btn btn-green" onClick={() => setActionState({ caseNumber: c.case_number, action: 'APPROVE', notes: '' })}><Ico.checkC width={17} height={17} /> {t('Approve')}</button>
-                          <button className="btn btn-red" onClick={() => setActionState({ caseNumber: c.case_number, action: 'REJECT', notes: '' })}><Ico.xC width={17} height={17} /> {t('Reject')}</button>
-                          <span className="fine"><Ico.warn width={15} height={15} /> Decision will notify the applicant via WhatsApp and create an audit log entry.</span>
+                          <button className="btn btn-green" onClick={() => setActionState({ caseNumber: c.case_number, action: 'APPROVE', notes: '', requestedDocs: '' })}><Ico.checkC width={17} height={17} /> {t('Approve')}</button>
+                          <button className="btn btn-red" onClick={() => setActionState({ caseNumber: c.case_number, action: 'REJECT', notes: '', requestedDocs: '' })}><Ico.xC width={17} height={17} /> {t('Reject')}</button>
+                          <button className="btn btn-neutral" onClick={() => setActionState({ caseNumber: c.case_number, action: 'REQUEST_DOCS', notes: '', requestedDocs: '' })}><Ico.doc2 width={16} height={16} /> {t('Request Documents')}</button>
+                          <span className="fine"><Ico.warn width={15} height={15} /> {t('Approve / Reject notifies the applicant via WhatsApp. Request Documents asks them to re-upload.')}</span>
                         </>
                       )}
                     </div>

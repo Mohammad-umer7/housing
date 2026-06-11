@@ -28,8 +28,18 @@ export async function GET(req: NextRequest) {
         cases = cases.filter(c => c.status === statusFilter)
       }
     } else {
-      // Officer escalation queue — escalated cases awaiting a manual decision.
-      cases = cases.filter(c => c.status === 'escalated')
+      // Officer escalation queue — escalated cases STILL awaiting a manual decision. A case
+      // the officer already returned to the citizen for more documents (case_study
+      // recommendation 'Request Documents') drops out of the queue; it re-enters when the
+      // citizen resubmits as a fresh -rN case.
+      cases = cases.filter(c => {
+        if (c.status !== 'escalated') return false
+        const cs = c.case_study
+        const recommendation = cs && typeof cs === 'object'
+          ? String((cs as { recommendation?: unknown }).recommendation ?? '')
+          : ''
+        return recommendation !== 'Request Documents'
+      })
     }
 
     // Attach the GOVERNANCE RULE that caused each decision (rule_triggered lives in

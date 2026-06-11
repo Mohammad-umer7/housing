@@ -9,7 +9,7 @@ import {
   getAuditLogsByCaseNumber,
 } from '@/lib/data-layer'
 import { supabaseAdmin } from '@/lib/supabase'
-import { executeNotificationTool } from '@/tools/notification-tools'
+import { notifyApplicant } from '@/tools/notification-tools'
 
 // GET /api/officer/cases/[caseNumber] — full case detail for officer/admin
 export async function GET(
@@ -82,24 +82,95 @@ export async function PATCH(
   try {
     const { caseNumber } = await params
     const body = await req.json()
-    const { action, officerNotes } = body
+    const { action, officerNotes, requestedDocuments } = body as {
+      action?: string
+      officerNotes?: string
+      requestedDocuments?: string
+    }
 
-    if (!action || !['APPROVE', 'REJECT'].includes(action)) {
-      return NextResponse.json(errorResponse('action must be APPROVE or REJECT', 400), { status: 400 })
+    if (!action || !['APPROVE', 'REJECT', 'REQUEST_DOCS'].includes(action)) {
+      return NextResponse.json(
+        errorResponse('action must be APPROVE, REJECT or REQUEST_DOCS', 400),
+        { status: 400 },
+      )
     }
 
     const caseRecord = await getCaseByCaseNumber(caseNumber)
     if (!caseRecord) {
       return NextResponse.json(errorResponse('Case not found', 404), { status: 404 })
     }
+    const rec = caseRecord as Record<string, unknown>
+    const phone = rec.phone as string | undefined
+    const baseCaseNumber = caseNumber.replace(/-r\d+$/i, '')
 
+    // ── REQUEST_DOCS — ask the citizen for additional documents ──────────────────
+    // Reuses the existing "Request Documents" recommendation so the citizen's home shows
+    // the "Submit Documents" re-upload CTA and the re-submission gate lets them back in.
+    // The case drops out of the officer's pending queue (filtered in the list route) and
+    // re-enters automatically when the citizen resubmits (a fresh -rN case is processed).
+    if (action === 'REQUEST_DOCS') {
+      const docsAsked = (requestedDocuments ?? '').trim()
+      const officerRationale =
+        `Officer ${consumer.name} requested additional documents.` +
+        (docsAsked ? ` Requested: ${docsAsked}.` : '') +
+        (officerNotes?.trim() ? ` Notes: ${officerNotes.trim()}.` : '')
+
+      // Merge the recommendation into the existing case_study (keep the AI assessment).
+      const existingStudy =
+        rec.case_study && typeof rec.case_study === 'object'
+          ? (rec.case_study as Record<string, unknown>)
+          : {}
+      const mergedStudy = {
+        ...existingStudy,
+        recommendation: 'Request Documents',
+        documentsRequest: {
+          by: consumer.name,
+          at: new Date().toISOString(),
+          requested: docsAsked || null,
+          note: officerNotes?.trim() || null,
+        },
+      }
+
+      await upsertCaseDecision(caseNumber, {
+        status: 'escalated', // soft state; excluded from the pending queue via the recommendation
+        decision_reason: officerRationale,
+        case_study: mergedStudy,
+        processed_at: new Date().toISOString(),
+      })
+
+      await createAuditLog({
+        case_number: caseNumber,
+        action: 'OFFICER_REQUEST_DOCS',
+        decision: 'request_documents',
+        rationale: officerRationale,
+        processed_by: consumer.name,
+        timestamp: new Date().toISOString(),
+      })
+
+      const message =
+        `Your housing arrears rescheduling request ${caseNumber} needs additional documents before a MOEI officer can decide.` +
+        (docsAsked ? ` Please provide: ${docsAsked}.` : '') +
+        ` Log in to SADDAD and use "Submit Documents" on your application to upload. Ministry of Energy and Infrastructure — SADDAD.`
+      const notify = await notifyApplicant({ phone, message, caseNumber })
+
+      return NextResponse.json(
+        successResponse({
+          caseNumber,
+          newStatus: 'request_documents',
+          message: 'Additional documents requested from the applicant',
+          notification: notify,
+        }),
+      )
+    }
+
+    // ── APPROVE / REJECT ─────────────────────────────────────────────────────────
     const newStatus = action === 'APPROVE' ? 'approved' : 'rejected'
     const officerRationale = officerNotes?.trim()
       ? `Officer ${consumer.name} manually ${action.toLowerCase()}d. Notes: ${officerNotes}`
       : `Officer ${consumer.name} manually ${action.toLowerCase()}d. No additional notes.`
 
     // Preserve original AI rationale — prepend officer decision
-    const existingRationale = (caseRecord as Record<string, unknown>).decision_reason as string ?? ''
+    const existingRationale = (rec.decision_reason as string) ?? ''
     const combinedRationale = officerRationale + (existingRationale ? `\n\n[AI Analysis]\n${existingRationale}` : '')
 
     await upsertCaseDecision(caseNumber, {
@@ -110,7 +181,6 @@ export async function PATCH(
 
     // Sync applicants.status so the beneficiary registry reflects the real decision.
     // Re-submissions run under a `-rN` case id; the applicant row keeps the base id.
-    const baseCaseNumber = caseNumber.replace(/-r\d+$/i, '')
     await supabaseAdmin
       .from('applicants')
       .update({ status: newStatus })
@@ -125,20 +195,21 @@ export async function PATCH(
       timestamp: new Date().toISOString(),
     })
 
-    // WhatsApp notification
-    const phone = (caseRecord as Record<string, unknown>).phone as string | undefined
-    if (phone) {
-      const mp = (caseRecord as Record<string, unknown>).monthly_payment
-      const message = action === 'APPROVE'
-        ? `Your housing arrears rescheduling request ${caseNumber} has been APPROVED by a MOEI officer. Monthly payment: AED ${mp?.toLocaleString() ?? 'TBD'}. Ministry of Energy and Infrastructure — SADDAD.`
-        : `Your housing arrears rescheduling request ${caseNumber} has been reviewed by a MOEI officer and could not be approved at this time. Please contact your nearest service center. Ministry of Energy and Infrastructure — SADDAD.`
-      try {
-        await executeNotificationTool('send_whatsapp', { phone, message, caseNumber })
-      } catch { /* non-fatal */ }
-    }
+    // WhatsApp/SMS via the shared, sandbox-aware path (DEMO_NOTIFY_PHONE override + SMS
+    // fallback + logging), so an officer reject actually reaches the citizen.
+    const mp = rec.monthly_payment as number | null | undefined
+    const message = action === 'APPROVE'
+      ? `Your housing arrears rescheduling request ${caseNumber} has been APPROVED by a MOEI officer. Monthly payment: AED ${mp?.toLocaleString() ?? 'TBD'}. Ministry of Energy and Infrastructure — SADDAD.`
+      : `Your housing arrears rescheduling request ${caseNumber} has been reviewed by a MOEI officer and could not be approved at this time. Please contact your nearest service center. Ministry of Energy and Infrastructure — SADDAD.`
+    const notify = await notifyApplicant({ phone, message, caseNumber })
 
     return NextResponse.json(
-      successResponse({ caseNumber, newStatus, message: `Case ${action.toLowerCase()}d by officer` })
+      successResponse({
+        caseNumber,
+        newStatus,
+        message: `Case ${action.toLowerCase()}d by officer`,
+        notification: notify,
+      })
     )
   } catch (error) {
     return NextResponse.json(errorResponse(String(error), 500), { status: 500 })

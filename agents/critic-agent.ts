@@ -163,7 +163,9 @@ FINANCIALS:
 - Affordability ratio: ${(financials.affordability_ratio * 100).toFixed(1)}%
 - Debt-to-income ratio: ${(financials.debt_to_income_ratio * 100).toFixed(1)}%
 - Within remaining loan period: ${financials.within_loan_period}
-
+${financials.arrears_deferred ? `
+DEFERRAL PLAN — THIS IS THE INTENDED OUTCOME, NOT A DATA ERROR: the beneficiary has a verified ${financials.unemployment ? 'unemployment' : 'temporary'} circumstance, so under the MOEI Assessment Matrix the arrears are DEFERRED to the end of the loan term. The existing monthly installment of AED ${financials.current_installment.toLocaleString()} stays UNCHANGED and the added arrears premium is AED 0 BY DESIGN — the citizen's salary is deliberately NOT deducted any further while the circumstance lasts. A "proposed monthly payment" of AED 0 is therefore CORRECT and fully consistent with the rule rationale; it is NOT a data inconsistency or a mismatch. Both binding rules (20% deduction, loan period) already pass, so do NOT FORCE_ESCALATE on these grounds.
+` : ''}
 Review the case, calling tools if useful, then give your verdict.`
 
     let review: CriticReview = defaultReview
@@ -197,8 +199,26 @@ Review the case, calling tools if useful, then give your verdict.`
       // cases for an officer. (An already-ESCALATED decision is confirmed earlier and
       // never reaches here.) So a veto only takes effect when the proposal is APPROVED.
       const wantsEscalate = parsed.verdict === 'FORCE_ESCALATE' && proposedDecision === 'APPROVED'
-      const verdict: CriticVerdict = wantsEscalate ? 'FORCE_ESCALATE' : 'APPROVE_AS_IS'
-      const finalDecision = wantsEscalate ? 'ESCALATED' : proposedDecision
+      // Guard against a spurious veto of a CLEAN DEFERRAL. A verified unemployment /
+      // temporary-circumstance case defers arrears to the loan end (installment unchanged,
+      // AED 0 premium) — the intended Assessment-Matrix outcome, NOT a data anomaly. When
+      // both binding rules pass, the document is authentic, and fairness is consistent, the
+      // only legitimate escalation grounds left (document fraud) are enforced by the
+      // deterministic guard below — so the LLM must not turn this approvable deferral into
+      // officer review just because the AED 0 premium "looks like" a mismatch.
+      const authOk = ['verified', 'skipped'].includes(String(applicant.document_authenticity ?? 'skipped'))
+      const cleanDeferral =
+        financials.arrears_deferred === true &&
+        financials.within_loan_period === true &&
+        financials.twenty_percent_rule_pass === true &&
+        fairnessResult.consistencyFlag === true &&
+        authOk
+      if (wantsEscalate && cleanDeferral) {
+        console.log(`[CriticAgent] suppressing spurious veto of a clean deferral case=${caseNumber}`)
+      }
+      const effectiveEscalate = wantsEscalate && !cleanDeferral
+      const verdict: CriticVerdict = effectiveEscalate ? 'FORCE_ESCALATE' : 'APPROVE_AS_IS'
+      const finalDecision = effectiveEscalate ? 'ESCALATED' : proposedDecision
       review = {
         verdict,
         complianceFlags: Array.isArray(parsed.complianceFlags) ? parsed.complianceFlags.slice(0, 5) : [],

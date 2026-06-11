@@ -36,6 +36,26 @@ const MAX_PDF_BYTES  = 12 * 1024 * 1024  // 12 MB size guard
 const RENDER_SCALE   = 1.8               // ~1070 × 1515 px for A4 — good OCR quality
 const JPEG_QUALITY   = 0.82
 
+// ── Gemini (PRIMARY vision provider) ───────────────────────────────────────────
+// Gemini takes the PDF directly (inline_data) — no page-rendering needed — and has its
+// own free-tier quota pool. All GEMINI_API_KEY* keys are tried in order; only once every
+// Gemini key is exhausted does vision fall back to the OpenRouter vision models below.
+
+const GEMINI_MODEL = process.env.GEMINI_MODEL ?? 'gemini-2.5-flash'
+
+function geminiApiKeys(): string[] {
+  const raw = [
+    process.env.GEMINI_API_KEY,
+    process.env.GEMINI_API_KEY_2,
+    process.env.GEMINI_API_KEY_3,
+    ...String(process.env.GEMINI_API_KEYS ?? '').split(','),
+  ]
+  return Array.from(new Set(raw.map(k => (k ?? '').trim()).filter(Boolean)))
+}
+
+const hasGeminiKeys = () => geminiApiKeys().length > 0
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+
 // ── Vision model discovery ────────────────────────────────────────────────────
 
 function discoverVisionModels(): string[] {
@@ -55,9 +75,14 @@ const _visionModels = discoverVisionModels()
 interface CB { failures: number; openUntil: number }
 const _cb: CB[] = _visionModels.map(() => ({ failures: 0, openUntil: 0 }))
 
-/** True when at least one vision model AND at least one API key are configured. */
-export function isVisionConfigured(): boolean {
+/** True when the OpenRouter vision fallback is usable (≥1 vision model AND ≥1 key). */
+function isOpenRouterVisionConfigured(): boolean {
   return _visionModels.length > 0 && getAllSlots().length > 0
+}
+
+/** True when ANY vision provider is available — Gemini (primary) or OpenRouter (fallback). */
+export function isVisionConfigured(): boolean {
+  return hasGeminiKeys() || isOpenRouterVisionConfigured()
 }
 
 // ── PDF → JPEG image conversion ───────────────────────────────────────────────
@@ -395,27 +420,158 @@ function coerceAuthenticity(raw: unknown, expectedType: ExpectedDocType): Vision
   }
 }
 
+// ── Gemini direct-PDF calls (PRIMARY) ─────────────────────────────────────────
+// Gemini accepts the PDF inline (no page rendering). Keys are tried in order; a 429
+// (rate-limit / quota) or 401/403 (bad key) advances to the NEXT key, a 503 retries the
+// same key briefly, anything else gives up. Returns cleaned JSON text or null.
+
+async function callGeminiPdf(
+  base64: string, apiKey: string, prompt: string, maxOutputTokens: number, signal: AbortSignal,
+): Promise<Response> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`
+  return fetch(url, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+    body: JSON.stringify({
+      contents: [{ parts: [
+        { inline_data: { mime_type: 'application/pdf', data: base64 } },
+        { text: prompt },
+      ] }],
+      generationConfig: {
+        temperature:      0,
+        responseMimeType: 'application/json',
+        maxOutputTokens,
+        // Disable "thinking" — newer Flash models otherwise spend the token budget on
+        // reasoning and truncate the JSON (0 = off; harmlessly ignored where unsupported).
+        thinkingConfig: { thinkingBudget: 0 },
+      },
+    }),
+    signal,
+  })
+}
+
+async function geminiAllKeys(
+  base64: string, prompt: string, maxOutputTokens: number, tag: string,
+): Promise<string | null> {
+  const keys = geminiApiKeys()
+  for (let k = 0; k < keys.length; k++) {
+    const keyLabel = `key ${k + 1}/${keys.length}`
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
+      try {
+        const res = await callGeminiPdf(base64, keys[k], prompt, maxOutputTokens, controller.signal)
+        clearTimeout(timer)
+        if (res.status === 429 || res.status === 401 || res.status === 403) {
+          console.warn(`[${tag}] ${res.status} on ${keyLabel} — rate-limited/exhausted/unauthorized, next key`)
+          break // next key
+        }
+        if (res.status === 503) {
+          console.warn(`[${tag}] 503 on ${keyLabel} (attempt ${attempt + 1}) — retrying`)
+          if (attempt < 1) await sleep(1500 * (attempt + 1))
+          continue
+        }
+        if (!res.ok) {
+          console.warn(`[${tag}] non-OK ${res.status} on ${keyLabel}`)
+          return null
+        }
+        const text = (await res.json() as {
+          candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
+        })?.candidates?.[0]?.content?.parts?.[0]?.text
+        return text ? text.trim() : null
+      } catch (err) {
+        clearTimeout(timer)
+        console.warn(`[${tag}] ${keyLabel} attempt ${attempt + 1} error: ${String(err).slice(0, 120)}`)
+        if (attempt < 1) await sleep(1000 * (attempt + 1))
+      }
+    }
+  }
+  return null // every Gemini key exhausted
+}
+
+function geminiOcrPrompt(expectedType: ExpectedDocType): string {
+  const p = DOC_TYPE_PROFILES[expectedType]
+  return `You are given a UAE ${p.label} as a PDF. Extract ONLY the following fields and return them as a raw JSON object with NO markdown or additional text:
+{
+${fieldJsonLines(expectedType)},
+  "confidence": <your overall extraction confidence from 0.0 to 1.0>
+}
+Use null for any field you cannot find. Return ONLY the JSON object.`
+}
+
+function geminiAuthPrompt(expectedType: ExpectedDocType): string {
+  const p     = DOC_TYPE_PROFILES[expectedType]
+  const today = new Date().toISOString().slice(0, 10)
+  return `You are a UAE government document examiner. A housing-loan beneficiary was asked to upload a ${p.label.toUpperCase()}, attached as a PDF.
+${p.geminiBrief}
+
+Make TWO independent judgments:
+
+1. TYPE — is this file actually a ${p.label}? Set "matchesExpectedType" to false ONLY when the file is clearly a DIFFERENT document type. Use null if uncertain.
+
+2. AUTHENTICITY — does it look genuinely issued? IGNORE stamps, signatures, and logos — many real documents are plain text. Judge ONLY: are expected fields present, is content internally consistent, is it professionally formatted?
+
+Reserve "suspicious"/"likely_fake" for: sparse content with almost no information, placeholder text, internally inconsistent figures, or obvious editing artefacts.
+
+Return ONLY this JSON object (no markdown, no explanation):
+{
+  "verdict": "authentic" | "suspicious" | "likely_fake" | "unreadable",
+  "confidence": <integer 0–100>,
+  "matchesExpectedType": <true | false | null>,
+  "reasons": [<short explanation strings>],
+  "observed": {
+    "documentType": <what type this appears to be, or null>,
+${fieldJsonLines(expectedType)}
+  }
+}
+
+Today's date is ${today} — do NOT treat a recent issue date as suspicious.`
+}
+
+async function geminiExtractFields(u8: Uint8Array, expectedType: ExpectedDocType): Promise<VisionOCRFields | null> {
+  const text = await geminiAllKeys(Buffer.from(u8).toString('base64'), geminiOcrPrompt(expectedType), 512, 'gemini-ocr')
+  if (!text) return null
+  const raw = extractJson(text)
+  return raw ? coerceOCR(raw) : null
+}
+
+async function geminiAssessAuthenticity(u8: Uint8Array, expectedType: ExpectedDocType): Promise<VisionAssessment | null> {
+  const text = await geminiAllKeys(Buffer.from(u8).toString('base64'), geminiAuthPrompt(expectedType), 1024, 'gemini-auth')
+  if (!text) return null
+  const raw = extractJson(text)
+  return raw ? coerceAuthenticity(raw, expectedType) : null
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Tier-2 OCR: extract structured fields from a PDF via an OpenRouter vision model.
- * Returns null on any failure — pdf-extractor.ts falls through to Tier-3 regex.
+ * Tier-2 OCR: extract structured fields from a PDF. Gemini first (all keys, direct PDF);
+ * if every Gemini key is exhausted, fall back to an OpenRouter vision model.
+ * Returns null on total failure — pdf-extractor.ts falls through to Tier-3 regex.
  */
 export async function extractFieldsWithVision(
   pdfBytes: ArrayBuffer | Uint8Array | Buffer,
   expectedType: ExpectedDocType = 'salary_certificate',
 ): Promise<VisionOCRFields | null> {
-  if (!isVisionConfigured()) return null
-
   const u8 = pdfBytes instanceof Uint8Array ? pdfBytes : new Uint8Array(pdfBytes as ArrayBuffer)
   if (u8.byteLength === 0 || u8.byteLength > MAX_PDF_BYTES) return null
 
-  const images = await pdfToImages(u8, 2)
-  if (images.length === 0) return null
+  // PRIMARY: Gemini (all keys, PDF sent directly).
+  if (hasGeminiKeys()) {
+    const g = await geminiExtractFields(u8, expectedType)
+    if (g) { console.log(`[vision] Gemini OCR (${expectedType}) — confidence ${g.confidence}`); return g }
+    console.warn('[vision] Gemini OCR exhausted — falling back to OpenRouter vision')
+  }
 
-  const { data } = await runWithVision(images, ocrPrompt(expectedType), 512, coerceOCR)
-  if (data) console.log(`[vision] OCR (${expectedType}) — confidence ${data.confidence}`)
-  return data
+  // FALLBACK: OpenRouter vision models (render PDF → images first).
+  if (isOpenRouterVisionConfigured()) {
+    const images = await pdfToImages(u8, 2)
+    if (images.length === 0) return null
+    const { data } = await runWithVision(images, ocrPrompt(expectedType), 512, coerceOCR)
+    if (data) console.log(`[vision] OpenRouter OCR (${expectedType}) — confidence ${data.confidence}`)
+    return data
+  }
+  return null
 }
 
 /**
@@ -427,21 +583,29 @@ export async function assessDocumentAuthenticity(
   pdfBytes: ArrayBuffer | Uint8Array | Buffer,
   expectedType: ExpectedDocType = 'salary_certificate',
 ): Promise<VisionAssessment | null> {
-  if (!isVisionConfigured()) return null
-
   const u8 = pdfBytes instanceof Uint8Array ? pdfBytes : new Uint8Array(pdfBytes as ArrayBuffer)
   if (u8.byteLength === 0 || u8.byteLength > MAX_PDF_BYTES) return null
 
-  const images = await pdfToImages(u8, 3)
-  if (images.length === 0) return null
+  // PRIMARY: Gemini (all keys, PDF sent directly).
+  if (hasGeminiKeys()) {
+    const g = await geminiAssessAuthenticity(u8, expectedType)
+    if (g) return g
+    console.warn('[vision] Gemini authenticity exhausted — falling back to OpenRouter vision')
+  }
 
-  const { data } = await runWithVision(
-    images,
-    authenticityPrompt(expectedType),
-    1024,
-    (raw) => coerceAuthenticity(raw, expectedType),
-  )
-  return data
+  // FALLBACK: OpenRouter vision models (3 pages — more context for authenticity).
+  if (isOpenRouterVisionConfigured()) {
+    const images = await pdfToImages(u8, 3)
+    if (images.length === 0) return null
+    const { data } = await runWithVision(
+      images,
+      authenticityPrompt(expectedType),
+      1024,
+      (raw) => coerceAuthenticity(raw, expectedType),
+    )
+    return data
+  }
+  return null
 }
 
 // Legacy aliases — gemini.ts re-exports these, no changes needed in callers
