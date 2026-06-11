@@ -84,6 +84,7 @@ ${JSON.stringify({
   unemployment: financials.unemployment,
   temporaryCircumstance: financials.temporary_circumstance,
   arrearsDeferred: financials.arrears_deferred,
+  reschedulingPath: financials.rescheduling_path,
   hasActiveApplication: Boolean(applicant.has_active_application),
   arrearsAmount: applicant.arrears_amount,
   unpaidInstallments: applicant.months_in_arrears,

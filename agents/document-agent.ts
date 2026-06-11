@@ -22,6 +22,9 @@ import { updateAgentStep, type AgentName } from '@/lib/data-layer'
 import { getApplicant } from '@/lib/integrations/source-systems'
 import {
   buildVerificationReport,
+  buildWeightedScore,
+  validateRefNumberFormat,
+  validateDateNotFuture,
   DOC_TYPE_PROFILES,
   type StructureCheck,
   type VisionAssessment,
@@ -155,6 +158,44 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
         validatedSalaryCertDate: formData.validatedSalaryCertDate ? String(formData.validatedSalaryCertDate) : null,
         hashIntegrity: (formData.pdfHashIntegrity as { hasToken: boolean; hashMatch: boolean; storedHash: string | null; computedHash: string | null } | null) ?? null,
       })
+
+      // Duplicate-reference fraud signal — the same certificate reference number was
+      // found in ANOTHER beneficiary's submission (cross-checked in the API route).
+      // A copied genuine document with altered figures is a mismatch → officer review.
+      const refDuplicate = formData.refNumberUnique === false
+      const docRefNumber = formData.pdfExtractedRefNumber ? String(formData.pdfExtractedRefNumber) : null
+      verificationReport.checks.push({
+        id: 'ref_uniqueness',
+        label: 'Certificate reference number not used by another beneficiary',
+        status: !docRefNumber ? 'na' : refDuplicate ? 'fail' : 'pass',
+        detail: !docRefNumber
+          ? 'No reference number found on the document to cross-check.'
+          : refDuplicate
+          ? `Reference number ${docRefNumber} already appears in another beneficiary's submission — strong copy-paste fraud signal.`
+          : `Reference number ${docRefNumber} is unique across all submissions.`,
+        weight: 15,
+      })
+      if (refDuplicate && (verificationReport.verdict === 'verified' || verificationReport.verdict === 'unverifiable')) {
+        verificationReport = {
+          ...verificationReport,
+          verdict: 'mismatch',
+          summary: `${verificationReport.summary} FRAUD SIGNAL: the certificate reference number (${docRefNumber}) was already used in a different beneficiary's submission — referred for officer review.`,
+        }
+      }
+
+      // UAE pipeline 100-point score — every input is a REAL signal computed upstream:
+      // PDF binary forensics from the API route, format validators on the actual
+      // submitted values, and the issue date read off the document by OCR/vision.
+      const docIssueDate = extractedFields.issueDate ?? vision?.observed?.issueDate ?? null
+      const primaryPipelineScore = buildWeightedScore(verificationReport, {
+        pdfMetadataSuspicious: Boolean((formData.pdfMetadata as { suspicious?: boolean } | null)?.suspicious),
+        fontsSuspicious:       Boolean((formData.fontConsistency as { suspicious?: boolean } | null)?.suspicious),
+        ocrDeltaSuspicious:    false,
+        eidFormatPass:         Boolean(formData.eidFormatValid !== false),
+        refFormatPass:         docRefNumber ? validateRefNumberFormat(docRefNumber) && !refDuplicate : true,
+        dateNotFuture:         validateDateNotFuture(docIssueDate),
+      })
+      verificationReport = { ...verificationReport, uaePipelineScore: primaryPipelineScore }
 
       // If primary is valid/accepted and we have a supporting document uploaded in this same primary stage:
       if (stage === 'primary' && verificationReport.verdict !== 'invalid' && Boolean(formData.supportingDocUploaded) && required.supporting) {

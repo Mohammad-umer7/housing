@@ -126,6 +126,32 @@ export async function getCasesByEmiratesId(emiratesId: string) {
   })
 }
 
+// The MOST RECENT case for a base Application ID. Every re-submission gets its own
+// "-rN" case number, so a lookup by the base ID alone (what the citizen tracks and
+// the assistant receives) would return the OLDEST submission. This resolves the
+// base ID (or any exact case number) to the newest matching case row.
+export async function getLatestCaseForBaseAppId(baseAppId: string) {
+  if (!baseAppId) return null
+  const base = baseAppId.replace(/-r\d+$/, '') // accept either a base ID or a -rN case number
+  const { data } = await supabaseAdmin
+    .from('cases')
+    .select('*')
+    .like('case_number', `${base}%`)
+  const rows = ((data ?? []) as Record<string, unknown>[]).filter(r => {
+    const cn = String(r.case_number ?? '')
+    return cn === base || cn.startsWith(`${base}-r`)
+  })
+  if (rows.length === 0) return null
+  // The -rN suffix IS the submission order (base = 0, -r2 = 2, …) — deterministic,
+  // unlike created_at vs processed_at timestamps.
+  const rev = (r: Record<string, unknown>) => {
+    const m = String(r.case_number ?? '').match(/-r(\d+)$/)
+    return m ? parseInt(m[1], 10) : 0
+  }
+  rows.sort((a, b) => rev(b) - rev(a))
+  return rows[0]
+}
+
 export async function upsertCase(data: CaseInput) {
   const { error } = await supabaseAdmin.from('cases').upsert(data, { onConflict: 'case_number' })
   if (error) throw new Error(`upsertCase failed: ${error.message}`)
@@ -383,16 +409,37 @@ export async function addToQueue(caseNumber: string, formData: unknown) {
   if (error) throw new Error(`addToQueue failed: ${error.message}`)
 }
 
+// A job stuck in queued/processing beyond this window is dead (worker crashed,
+// server restarted mid-run, or an upstream call hung). Treat it as failed so the
+// citizen is never permanently blocked from re-submitting.
+const STALE_JOB_MS = 10 * 60 * 1000
+
 export async function getActiveJob(caseNumber: string) {
   // maybeSingle + limit(1): never throw on 0 or (defensively) >1 rows.
   const { data } = await supabaseAdmin
     .from('job_queue')
-    .select('id, status')
+    .select('id, status, queued_at, started_at')
     .eq('case_number', caseNumber)
     .in('status', ['queued', 'processing'])
     .order('queued_at', { ascending: false })
     .limit(1)
     .maybeSingle()
+  if (!data) return null
+  // Stale-job recovery: mark the dead row failed and report "no active job".
+  const anchor = (data as { started_at?: string; queued_at?: string }).started_at
+    ?? (data as { queued_at?: string }).queued_at
+  if (anchor && Date.now() - new Date(anchor).getTime() > STALE_JOB_MS) {
+    console.warn(`[getActiveJob] stale ${data.status} job for case=${caseNumber} — marking failed`)
+    await supabaseAdmin
+      .from('job_queue')
+      .update({
+        status: 'failed',
+        error_message: 'Stale job — exceeded the 10-minute processing window (worker restart or hung upstream call).',
+        completed_at: new Date().toISOString(),
+      })
+      .eq('id', data.id)
+    return null
+  }
   return data
 }
 
@@ -663,6 +710,42 @@ export async function getCaseDocumentManifest(caseNumber: string): Promise<CaseD
   return {
     requestDescription: fd?.requestDescription ? String(fd.requestDescription) : null,
     documents: docs.map(({ base64: _b, ...rest }) => rest),
+  }
+}
+
+// ── Reference number uniqueness check ────────────────────────────────────────
+// Returns true when the ref number is NOT found in any OTHER beneficiary's
+// submission — false means the same document reference number was already used by
+// someone else, a strong fraud signal (copy-paste of a genuine certificate with
+// altered figures). The same beneficiary legitimately re-uploads the same cert
+// during a Request-Documents round-trip, so same-EID rows are never counted.
+// Fail-open: network/DB errors return true (don't block legitimate submissions).
+export async function checkRefNumberUniqueness(
+  refNumber: string,
+  currentCaseNumber: string,
+  emiratesId?: string
+): Promise<boolean> {
+  if (!refNumber || refNumber.length < 5) return true
+  const ownEid = String(emiratesId ?? '').replace(/[^0-9]/g, '')
+  try {
+    const { data } = await supabaseAdmin
+      .from('job_queue')
+      .select('case_number, form_data')
+      .neq('case_number', currentCaseNumber)
+      .order('queued_at', { ascending: false })
+      .limit(200)
+    if (!data) return true
+    for (const row of data) {
+      const fd = row.form_data as Record<string, unknown> | null
+      if (!fd) continue
+      const rowEid = String(fd.emirates_id ?? '').replace(/[^0-9]/g, '')
+      if (ownEid && rowEid && rowEid === ownEid) continue // same person — not fraud
+      const storedRef = String(fd.pdfExtractedRefNumber ?? '')
+      if (storedRef && storedRef === refNumber) return false
+    }
+    return true
+  } catch {
+    return true
   }
 }
 

@@ -4,9 +4,11 @@
 
 import {
   toRecommendation,
+  RESCHEDULING_PATH_LABELS,
   type FinancialAnalysis,
   type GovernanceResult,
   type Recommendation,
+  type ReschedulingPath,
 } from '@/governance/housing-arrears'
 
 export type CaseStudy = {
@@ -23,6 +25,10 @@ export type CaseStudy = {
   periodRule: 'Pass' | 'Fail'
   recommendation: Recommendation
   reasoning: string
+  // Official Assessment-Matrix path the agent selected, with bilingual labels
+  reschedulingPath: string
+  reschedulingPathLabel: string
+  reschedulingPathLabelAr: string
   // ── Two-document round-trip state ────────────────────────────────────────────
   // Set when the salary cert was validated but a reason-specific supporting document is
   // still owed; read by the lookup + submit routes so the resubmission only needs that
@@ -92,5 +98,8 @@ export function buildCaseStudy(params: {
     periodRule: f.period_rule_pass ? 'Pass' : 'Fail',
     recommendation,
     reasoning,
+    reschedulingPath: f.rescheduling_path,
+    reschedulingPathLabel: RESCHEDULING_PATH_LABELS[f.rescheduling_path as ReschedulingPath]?.en ?? f.rescheduling_path,
+    reschedulingPathLabelAr: RESCHEDULING_PATH_LABELS[f.rescheduling_path as ReschedulingPath]?.ar ?? '',
   }
 }

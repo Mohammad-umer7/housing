@@ -19,6 +19,13 @@ export interface AssistantCaseContext {
   monthlyPayment?: number | null
   durationMonths?: number | null
   rationale?: string | null
+  // Enriched facts (latest submission) so the assistant answers precisely:
+  recommendation?: string | null      // Approve · Request Documents · Reject · Refer to Employee
+  riskLevel?: string | null
+  totalNewMonthly?: number | null
+  verificationVerdict?: string | null // document verification outcome
+  reschedulingPathLabel?: string | null
+  pendingDocument?: string | null     // the specific document still owed, if any
 }
 
 export type AudiencePortal = 'citizen' | 'officer' | 'admin'
@@ -71,6 +78,9 @@ HOW TO RESPOND
   the rules above, the process, and a beneficiary's own case status). If asked anything
   outside this domain, briefly decline and steer back to housing-arrears help.
 - Be warm, clear and concise (aim for under ~120 words). Use simple language.
+- FORMAT with simple Markdown the chat window renders: short paragraphs, "- " bullet
+  lists for steps/documents, **bold** for key figures and rule names, and an optional
+  "### " heading as a short answer title. No tables, no links, no raw HTML.
 - Reply in the SAME language as the user's last message (English or Arabic). You may add a
   short bilingual line where helpful.
 - Never promise an approval or invent specific numbers/outcomes. Quote the ${pct(OFFICIAL_MOEI_RULES.MAX_DEDUCTION_PERCENT)}
@@ -90,7 +100,13 @@ function caseContextBlock(ctx?: AssistantCaseContext | null): string {
     ctx.status ? `- Processing status: ${ctx.status}` : '',
     ctx.decision ? `- Decision: ${ctx.decision}` : '',
     ctx.monthlyPayment != null ? `- Proposed monthly payment: AED ${Number(ctx.monthlyPayment).toLocaleString()}` : '',
+    ctx.totalNewMonthly != null ? `- Total new monthly deduction: AED ${Number(ctx.totalNewMonthly).toLocaleString()}` : '',
     ctx.durationMonths != null ? `- Proposed duration: ${ctx.durationMonths} months` : '',
+    ctx.recommendation ? `- Recommendation: ${ctx.recommendation}` : '',
+    ctx.reschedulingPathLabel ? `- Rescheduling path: ${ctx.reschedulingPathLabel}` : '',
+    ctx.riskLevel ? `- Risk level: ${ctx.riskLevel}` : '',
+    ctx.verificationVerdict ? `- Document verification: ${ctx.verificationVerdict}` : '',
+    ctx.pendingDocument ? `- Document still required from the beneficiary: ${ctx.pendingDocument}` : '',
     ctx.rationale ? `- Reasoning on record: ${ctx.rationale}` : '',
   ].filter(Boolean)
   if (ctx.fullName) {

@@ -65,7 +65,7 @@ export async function financialNode(state: SaddadStateType): Promise<SaddadNodeU
       status: 'done',
       completed_at: new Date().toISOString(),
       duration_ms: duration,
-      result_summary: `Deduction ${Math.round(financials.proposed_deduction_rate * 100)}% (premium AED ${financials.arrears_premium.toLocaleString()}/mo) × ${financials.proposed_duration}mo · ${financials.plan_type} · per-member AED ${financials.per_member_income.toLocaleString()}${hardshipNote}${deferNote} · 20%:${financials.twenty_percent_rule_pass ? 'PASS' : 'FAIL'} period:${financials.period_rule_pass ? 'PASS' : 'FAIL'} · Risk ${financials.risk_score}`,
+      result_summary: `Path: ${financials.rescheduling_path} · Deduction ${Math.round(financials.proposed_deduction_rate * 100)}% (premium AED ${financials.arrears_premium.toLocaleString()}/mo) × ${financials.proposed_duration}mo · ${financials.plan_type} · per-member AED ${financials.per_member_income.toLocaleString()}${hardshipNote}${deferNote} · 20%:${financials.twenty_percent_rule_pass ? 'PASS' : 'FAIL'} period:${financials.period_rule_pass ? 'PASS' : 'FAIL'} · Risk ${financials.risk_score}`,
     })
 
     console.log(`[FinancialAgent] DONE case=${caseNumber} duration=${duration}ms`)

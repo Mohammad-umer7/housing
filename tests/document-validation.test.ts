@@ -105,25 +105,25 @@ describe('Smart required documents (two-document model)', () => {
     expect(r.supporting?.label).toMatch(/non-work|termination/i)
   })
 
-  it('business failure → salary cert (primary) + bank/income statement (supporting)', () => {
+  it('business failure → salary cert (primary) + business failure certificate (supporting)', () => {
     const r = determineRequiredDocuments({ reschedule_reason: 'business_failure', hasIncomeRecord: true })
     expect(r.primary.type).toBe('salary_certificate')
-    expect(r.supporting?.type).toBe('income_statement')
-    expect(r.supporting?.label).toMatch(/bank|income statement/i)
+    expect(r.supporting?.type).toBe('business_failure_certificate')
+    expect(r.supporting?.label).toMatch(/business failure|closure|insolvency/i)
   })
 
-  it('medical expenses → salary cert (primary) + medical / supporting document (supporting)', () => {
+  it('medical expenses → salary cert (primary) + medical condition certificate (supporting)', () => {
     const r = determineRequiredDocuments({ reschedule_reason: 'medical_expenses', hasIncomeRecord: true })
     expect(r.primary.type).toBe('salary_certificate')
-    expect(r.supporting?.type).toBe('supporting_document')
-    expect(r.supporting?.label).toMatch(/medical|supporting/i)
+    expect(r.supporting?.type).toBe('medical_certificate')
+    expect(r.supporting?.label).toMatch(/medical/i)
   })
 
-  it('salary reduction / income change → salary cert (primary) + employer letter (supporting)', () => {
+  it('salary reduction / income change → salary cert (primary) + salary reduction certificate (supporting)', () => {
     const r = determineRequiredDocuments({ reschedule_reason: 'salary_reduction', income_changed: true, hasIncomeRecord: true })
     expect(r.primary.type).toBe('salary_certificate')
-    expect(r.supporting?.type).toBe('supporting_document')
-    expect(r.supporting?.label).toMatch(/employer letter|reduction/i)
+    expect(r.supporting?.type).toBe('salary_reduction_certificate')
+    expect(r.supporting?.label).toMatch(/salary reduction/i)
   })
 
   it('other / stable employment → salary cert only (no supporting doc)', () => {
@@ -133,10 +133,11 @@ describe('Smart required documents (two-document model)', () => {
     expect(r.requiresUpload).toBe(true)
   })
 
-  it('family circumstances → salary cert only (no supporting doc)', () => {
+  it('family circumstances → salary cert (primary) + family circumstances certificate (supporting)', () => {
     const r = determineRequiredDocuments({ reschedule_reason: 'family_circumstances', hasIncomeRecord: true })
     expect(r.primary.type).toBe('salary_certificate')
-    expect(r.supporting).toBeNull()
+    expect(r.supporting?.type).toBe('family_circumstances_certificate')
+    expect(r.supporting?.label).toMatch(/family circumstances/i)
   })
 
   it('back-compat: primaryType/labels/requiresUpload still point at the primary doc', () => {

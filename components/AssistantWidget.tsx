@@ -6,12 +6,73 @@
 // isolated per-role chat history. On a staff case-detail page the case ID is
 // attached automatically so the assistant can answer case-specific questions.
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { usePathname } from 'next/navigation'
 import { useA11y } from '@/components/AccessibilityProvider'
 
 type Msg = { role: 'user' | 'assistant'; content: string }
 type ChatRole = 'citizen' | 'officer' | 'admin'
+
+// ── Lightweight markdown renderer (no dependency) ─────────────────────────────
+// Supports what the assistant actually emits: ###/## headings, **bold**, *italic*,
+// `code`, bullet lists (- or •), numbered lists, and paragraphs. Anything else
+// renders as plain text — no raw HTML is ever injected (XSS-safe by construction).
+function inlineMd(text: string, keyBase: string): ReactNode[] {
+  const out: ReactNode[] = []
+  // Tokenise: **bold** · *italic* · `code`
+  const re = /(\*\*[^*]+\*\*|\*[^*\n]+\*|`[^`]+`)/g
+  let last = 0
+  let m: RegExpExecArray | null
+  let i = 0
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) out.push(text.slice(last, m.index))
+    const tok = m[0]
+    if (tok.startsWith('**')) out.push(<strong key={`${keyBase}-b${i}`}>{tok.slice(2, -2)}</strong>)
+    else if (tok.startsWith('`')) out.push(<code key={`${keyBase}-c${i}`}>{tok.slice(1, -1)}</code>)
+    else out.push(<em key={`${keyBase}-i${i}`}>{tok.slice(1, -1)}</em>)
+    last = m.index + tok.length
+    i++
+  }
+  if (last < text.length) out.push(text.slice(last))
+  return out
+}
+
+function renderMarkdown(text: string): ReactNode {
+  const lines = text.split('\n')
+  const blocks: ReactNode[] = []
+  let list: { ordered: boolean; items: string[] } | null = null
+
+  const flushList = (key: string) => {
+    if (!list) return
+    const items = list.items.map((item, j) => <li key={`${key}-li${j}`}>{inlineMd(item, `${key}-li${j}`)}</li>)
+    blocks.push(list.ordered ? <ol key={key}>{items}</ol> : <ul key={key}>{items}</ul>)
+    list = null
+  }
+
+  lines.forEach((raw, i) => {
+    const line = raw.trimEnd()
+    const bullet = line.match(/^\s*(?:[-*•])\s+(.*)$/)
+    const numbered = line.match(/^\s*\d+[.)]\s+(.*)$/)
+    const heading = line.match(/^\s*(#{1,4})\s+(.*)$/)
+
+    if (bullet) {
+      if (!list || list.ordered) { flushList(`l${i}`); list = { ordered: false, items: [] } }
+      list.items.push(bullet[1])
+    } else if (numbered) {
+      if (!list || !list.ordered) { flushList(`l${i}`); list = { ordered: true, items: [] } }
+      list.items.push(numbered[1])
+    } else {
+      flushList(`l${i}`)
+      if (heading) {
+        blocks.push(<h4 key={`h${i}`}>{inlineMd(heading[2], `h${i}`)}</h4>)
+      } else if (line.trim()) {
+        blocks.push(<p key={`p${i}`}>{inlineMd(line, `p${i}`)}</p>)
+      }
+    }
+  })
+  flushList('lend')
+  return <>{blocks}</>
+}
 
 // Extract a case number from a staff URL e.g. /admin/cases/MSZHP_100126 → MSZHP_100126
 function caseFromPath(pathname: string): string | null {
@@ -181,7 +242,9 @@ function AssistantChat({ chatRole, staffCase, citizenCase }: {
             )}
             {messages.map((m, i) => (
               <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
-                <div className={'assistant-bubble' + (m.role === 'user' ? ' user' : '')}>{m.content}</div>
+                <div className={'assistant-bubble' + (m.role === 'user' ? ' user' : ' md')}>
+                  {m.role === 'assistant' ? renderMarkdown(m.content) : m.content}
+                </div>
               </div>
             ))}
             {sending && (

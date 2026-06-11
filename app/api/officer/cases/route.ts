@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/middleware/auth'
 import { successResponse, errorResponse } from '@/lib/api-response'
 import { getRecentCases } from '@/lib/data-layer'
+import { supabaseAdmin } from '@/lib/supabase'
 
 // GET /api/officer/cases
 // Admin → all cases (optional ?status= filter; ?status=all or omitted = everything)
@@ -29,6 +30,26 @@ export async function GET(req: NextRequest) {
     } else {
       // Officer escalation queue — escalated cases awaiting a manual decision.
       cases = cases.filter(c => c.status === 'escalated')
+    }
+
+    // Attach the GOVERNANCE RULE that caused each decision (rule_triggered lives in
+    // the immutable audit log, not the case row) so the officer sees exactly WHY the
+    // AI did not auto-approve. One batched query for all listed cases.
+    const caseNumbers = cases.map(c => String(c.case_number)).filter(Boolean).slice(0, 200)
+    if (caseNumbers.length > 0) {
+      const { data: logs } = await supabaseAdmin
+        .from('audit_logs')
+        .select('case_number, rule_triggered, timestamp')
+        .in('case_number', caseNumbers)
+        .eq('action', 'AGENT_DECISION')
+        .order('timestamp', { ascending: false })
+      const ruleByCase = new Map<string, string>()
+      for (const row of (logs ?? []) as { case_number: string; rule_triggered: string | null }[]) {
+        if (row.rule_triggered && !ruleByCase.has(row.case_number)) {
+          ruleByCase.set(row.case_number, row.rule_triggered)
+        }
+      }
+      cases = cases.map(c => ({ ...c, rule_triggered: ruleByCase.get(String(c.case_number)) ?? null }))
     }
 
     return NextResponse.json(successResponse({ cases, total: cases.length }))

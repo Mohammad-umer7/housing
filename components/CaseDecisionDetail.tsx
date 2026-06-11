@@ -36,6 +36,9 @@ export type Decision = {
     periodRule: string
     recommendation: string
     reasoning: string
+    reschedulingPath?: string
+    reschedulingPathLabel?: string
+    reschedulingPathLabelAr?: string
     adminOverride?: { by: string; at: string; note: string; from: string; to: string } | null
   } | null
   verificationReport: {
@@ -43,6 +46,16 @@ export type Decision = {
     confidenceScore: number
     summary: string
     checks: { id: string; label: string; status: string; detail: string }[]
+    uaePipelineScore?: {
+      schemaValidation: number
+      arithmeticCheck: number
+      ruleEngine: number
+      llmSemanticRisk: number
+      databaseMatch: number
+      visualForgery: number
+      total: number
+      verdict: string
+    }
   } | null
 }
 
@@ -50,6 +63,7 @@ export const VERDICT_BADGE: Record<string, { label: string; cls: string }> = {
   verified: { label: 'Verified', cls: 'pill-green' },
   mismatch: { label: 'Mismatch', cls: 'pill-red' },
   suspicious: { label: 'Suspicious (AI vision)', cls: 'pill-red' },
+  hash_tampered: { label: 'Modified after issuance (hash)', cls: 'pill-red' },
   tampered: { label: 'Tampered', cls: 'pill-amber' },
   invalid: { label: 'Not a valid certificate', cls: 'pill-red' },
   unverifiable: { label: 'Documents required', cls: 'pill-amber' },
@@ -144,6 +158,36 @@ export function CaseDecisionDetail({
               <div><div className="muted" style={{ fontSize: 11 }}>Ends</div><div style={{ fontWeight: 800 }}>{endDateStr ?? '—'}</div></div>
             </div>
           </div>
+          {/* Current vs proposed deduction — visual % of salary, 20% cap marked */}
+          {d.monthlySalary != null && d.monthlySalary > 0 && (() => {
+            const salary = d.monthlySalary!
+            const current = d.currentInstallment ?? 0
+            const proposed = d.totalNewMonthly ?? ((d.monthlyPayment ?? 0) + current)
+            const curPct = Math.min(100, (current / salary) * 100)
+            const newPct = Math.min(100, (proposed / salary) * 100)
+            const bar = (label: string, amount: number, pct: number, color: string) => (
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 3 }}>
+                  <span className="muted">{label}</span>
+                  <span style={{ fontWeight: 700 }}>AED {Math.round(amount).toLocaleString()}/mo · {pct.toFixed(1)}% {t('of salary')}</span>
+                </div>
+                <div style={{ position: 'relative', height: 8, background: 'var(--line)', borderRadius: 4, overflow: 'hidden' }}>
+                  <div style={{ width: `${Math.min(100, pct * 4)}%`, height: '100%', background: color, borderRadius: 4 }} />
+                  {/* 20% cap marker at 4× scale → 80% of track */}
+                  <div style={{ position: 'absolute', left: '80%', top: 0, bottom: 0, width: 2, background: 'var(--red)', opacity: .55 }} />
+                </div>
+              </div>
+            )
+            return (
+              <div style={{ marginTop: 12 }}>
+                {bar(t('Current deduction'), current, curPct, 'var(--faint)')}
+                {bar(t('Proposed deduction'), proposed, newPct, newPct <= 20 ? 'var(--green)' : 'var(--red)')}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', fontSize: 11, color: 'var(--muted)' }}>
+                  <span><span style={{ display: 'inline-block', width: 8, height: 8, background: 'var(--red)', opacity: .55, marginRight: 4, verticalAlign: 'middle' }} />{t('20% statutory cap')}</span>
+                </div>
+              </div>
+            )
+          })()}
           <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>Rule G-03 — total salary deduction capped at 20% of income.</p>
         </div>
       )}
@@ -184,6 +228,14 @@ export function CaseDecisionDetail({
             <Row k="Loan Period Rule" v={pass(d.caseStudy.periodRule)} />
             <Row k="Recommendation" v={<strong style={{ color: 'var(--blue)' }}>{d.caseStudy.recommendation}</strong>} />
           </div>
+          {/* Official Assessment-Matrix path the agent selected (bilingual) */}
+          {d.caseStudy.reschedulingPathLabel && (
+            <div style={{ marginTop: 12, padding: '10px 14px', background: 'var(--gold-tint, var(--panel-alt))', border: '1px solid var(--gold-line, var(--line))', borderRadius: 'var(--r)', display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span className="muted" style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase' }}>{t('Rescheduling Path')} <span className="mono" style={{ textTransform: 'none', fontWeight: 600 }}>· {d.caseStudy.reschedulingPath}</span></span>
+              <span style={{ fontWeight: 700, fontSize: 14 }}>{d.caseStudy.reschedulingPathLabel}</span>
+              {d.caseStudy.reschedulingPathLabelAr && <span className="ar" dir="rtl" style={{ fontSize: 13.5, color: 'var(--muted)' }}>{d.caseStudy.reschedulingPathLabelAr}</span>}
+            </div>
+          )}
         </div>
       )}
 
@@ -197,6 +249,41 @@ export function CaseDecisionDetail({
               {spk(docText, { marginLeft: 8 })}
             </div>
           </div>
+          {/* UAE Pipeline 100-point score breakdown */}
+          {d.verificationReport.uaePipelineScore && (() => {
+            const s = d.verificationReport!.uaePipelineScore!
+            const scoreColor = s.total >= 80 ? 'var(--green)' : s.total >= 60 ? 'var(--amber)' : 'var(--red)'
+            const rows: [string, number, number][] = [
+              ['Schema & Format', s.schemaValidation, 15],
+              ['Arithmetic Integrity', s.arithmeticCheck, 20],
+              ['Rule Engine', s.ruleEngine, 20],
+              ['AI Semantic Analysis', s.llmSemanticRisk, 20],
+              ['Database Cross-Check', s.databaseMatch, 15],
+              ['Visual Forgery Check', s.visualForgery, 10],
+            ]
+            return (
+              <div style={{ marginTop: 12, padding: '12px 14px', background: 'var(--panel-alt)', border: '1px solid var(--line)', borderRadius: 'var(--r)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <span className="muted" style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase' }}>{t('Document Authenticity Score')}</span>
+                  <span className="mono" style={{ fontWeight: 800, fontSize: 15, color: scoreColor }}>{s.total}/100 · {s.verdict}</span>
+                </div>
+                <div style={{ height: 6, background: 'var(--line)', borderRadius: 3, marginBottom: 10, overflow: 'hidden' }}>
+                  <div style={{ width: `${s.total}%`, height: '100%', background: scoreColor, borderRadius: 3, transition: 'width .4s' }} />
+                </div>
+                <div style={{ display: 'grid', gap: 4 }}>
+                  {rows.map(([label, score, max]) => (
+                    <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                      <span style={{ width: 140, color: 'var(--muted)', flexShrink: 0 }}>{label}</span>
+                      <div style={{ flex: 1, height: 4, background: 'var(--line)', borderRadius: 2, overflow: 'hidden' }}>
+                        <div style={{ width: `${(score / max) * 100}%`, height: '100%', background: score === max ? 'var(--green)' : score > 0 ? 'var(--amber)' : 'var(--red)', borderRadius: 2 }} />
+                      </div>
+                      <span className="mono" style={{ fontWeight: 700, flexShrink: 0, minWidth: 36, textAlign: 'right' }}>{score}/{max}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
           <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
             {d.verificationReport.checks.map(c => (
               <div key={c.id} style={{ display: 'flex', gap: 8, fontSize: 13 }}>

@@ -50,6 +50,16 @@ type CaseDetail = {
     recommendedAction?: string
     riskFlags?: string[]
     summary?: string
+    uaePipelineScore?: {
+      schemaValidation: number
+      arithmeticCheck:  number
+      ruleEngine:       number
+      llmSemanticRisk:  number
+      databaseMatch:    number
+      visualForgery:    number
+      total:            number
+      verdict:          string
+    }
   } | null
   agentSteps: AgentStep[]
   auditLogs: AuditEntry[]
@@ -67,6 +77,7 @@ const statusPill: Record<string, string> = {
 const verdictColor: Record<string, string> = {
   verified: 'var(--green)', unverifiable: 'var(--muted)', mismatch: 'var(--red)',
   suspicious: 'var(--amber)', tampered: 'var(--amber)', invalid: 'var(--red)',
+  hash_tampered: 'var(--red)',
 }
 
 function aed(n: number | null | undefined) {
@@ -309,6 +320,40 @@ export default function AdminCaseDetailPage() {
                   {caseData.verification_report.confidenceScore != null && (
                     <p style={{ fontSize: 13 }}>{t('Confidence')}: <span className="mono" style={{ fontWeight: 700 }}>{caseData.verification_report.confidenceScore}%</span></p>
                   )}
+                  {caseData.verification_report.uaePipelineScore && (() => {
+                    const s = caseData.verification_report!.uaePipelineScore!
+                    const scoreColor = s.total >= 80 ? 'var(--green)' : s.total >= 60 ? 'var(--amber)' : 'var(--red)'
+                    const scoreRows: [string, number, number][] = [
+                      ['Schema', s.schemaValidation, 15],
+                      ['Arithmetic', s.arithmeticCheck, 20],
+                      ['Rules', s.ruleEngine, 20],
+                      ['LLM', s.llmSemanticRisk, 20],
+                      ['Database', s.databaseMatch, 15],
+                      ['Forgery', s.visualForgery, 10],
+                    ]
+                    return (
+                      <div style={{ marginTop: 10, padding: '10px 12px', background: 'var(--panel-alt)', borderRadius: 'var(--r-sm)', border: '1px solid var(--line)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                          <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--muted)', letterSpacing: '.06em', textTransform: 'uppercase' }}>UAE Pipeline Score</span>
+                          <span style={{ fontWeight: 800, fontSize: 14, color: scoreColor }} className="mono">{s.total}/100 · {s.verdict}</span>
+                        </div>
+                        <div style={{ height: 5, background: 'var(--line)', borderRadius: 3, marginBottom: 8, overflow: 'hidden' }}>
+                          <div style={{ width: `${s.total}%`, height: '100%', background: scoreColor, borderRadius: 3, transition: 'width .4s' }} />
+                        </div>
+                        <div style={{ display: 'grid', gap: 3 }}>
+                          {scoreRows.map(([label, score, max]) => (
+                            <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+                              <span style={{ width: 62, color: 'var(--muted)', flexShrink: 0 }}>{label}</span>
+                              <div style={{ flex: 1, height: 3, background: 'var(--line)', borderRadius: 2, overflow: 'hidden' }}>
+                                <div style={{ width: `${(score / max) * 100}%`, height: '100%', background: score === max ? 'var(--green)' : score > 0 ? 'var(--amber)' : 'var(--red)', borderRadius: 2 }} />
+                              </div>
+                              <span className="mono" style={{ fontWeight: 700, color: 'var(--ink)', flexShrink: 0, minWidth: 28, textAlign: 'right' }}>{score}/{max}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })()}
                   {(caseData.verification_report.riskFlags?.length ?? 0) > 0 && (
                     <div style={{ marginTop: 8, display: 'grid', gap: 4 }}>
                       {caseData.verification_report.riskFlags!.map((f, i) => (

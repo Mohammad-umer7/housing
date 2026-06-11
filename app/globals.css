@@ -709,6 +709,9 @@ table.cases tr:hover td { background: var(--cream-soft); }
   width: 90%;
   max-width: 440px;
   padding: 40px;
+  /* Never clip on short screens — the dialog itself scrolls. */
+  max-height: 90vh;
+  overflow-y: auto;
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.35);
   position: relative;
   color: var(--ink);
@@ -1864,8 +1867,29 @@ html[lang="ar"] .fab-label { font-family: var(--font-ar); }
   max-width: 82%; padding: 9px 13px; border-radius: 14px; font-size: 13.5px;
   line-height: 1.55; white-space: pre-wrap; background: var(--panel-alt);
   border: 1px solid var(--line); color: var(--body);
+  overflow-wrap: break-word; min-width: 0;
 }
 .assistant-bubble.user { background: var(--gold); border-color: var(--gold); color: #fff; }
+
+/* Markdown-rendered assistant replies — structured, readable formatting. */
+.assistant-bubble.md { white-space: normal; }
+.assistant-bubble.md p { margin: 0 0 8px; }
+.assistant-bubble.md p:last-child { margin-bottom: 0; }
+.assistant-bubble.md h4 {
+  font-size: 13.5px; font-weight: 800; color: var(--ink);
+  margin: 10px 0 5px; padding-bottom: 3px; border-bottom: 1px solid var(--line);
+}
+.assistant-bubble.md h4:first-child { margin-top: 0; }
+.assistant-bubble.md ul, .assistant-bubble.md ol { margin: 2px 0 8px; padding-inline-start: 20px; display: grid; gap: 3px; }
+.assistant-bubble.md ul:last-child, .assistant-bubble.md ol:last-child { margin-bottom: 0; }
+.assistant-bubble.md li { line-height: 1.5; }
+.assistant-bubble.md li::marker { color: var(--gold-dark); font-weight: 700; }
+.assistant-bubble.md strong { color: var(--ink); font-weight: 800; }
+.assistant-bubble.md code {
+  font-family: ui-monospace, monospace; font-size: 12px;
+  background: var(--cream-soft); border: 1px solid var(--gold-line);
+  border-radius: 5px; padding: 1px 5px; color: var(--gold-dark);
+}
 
 .assistant-quick { padding: 0 14px 10px; display: flex; flex-wrap: wrap; gap: 6px; }
 .assistant-quick button {

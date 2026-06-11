@@ -50,6 +50,8 @@ export type FinancialAnalysis = {
   dbr_cap: number
   dbr_within_limit: boolean
   is_retiree: boolean
+  // The official decision-matrix path this case follows (Assessment Matrix)
+  rescheduling_path: string
 }
 
 export type GovernanceResult = {
@@ -57,6 +59,43 @@ export type GovernanceResult = {
   reason: string
   rule_triggered: string
   financial_analysis: FinancialAnalysis
+}
+
+// ── Official decision-matrix paths (challenge brief Assessment Matrix) ──────────
+// The five paths the agent must explicitly choose between, named so the citizen,
+// officer and judges can see WHICH path was taken and why.
+export type ReschedulingPath =
+  | 'RAISE_INSTALLMENT'         // headroom exists → raise deduction up to the 20% cap
+  | 'REDUCE_INCREASE'           // income down / hardship → lighter (~15%) increase
+  | 'MAINTAIN_INSTALLMENT'      // no headroom for an increase → keep installment
+  | 'ROLL_ARREARS_TO_END'       // unemployment → arrears deferred to loan end, no raise
+  | 'DEFER_TO_CIRCUMSTANCE_END' // temporary (medical/assignment) → defer until it ends
+  | 'REFER_HUMAN'               // obligations breach the DBR ceiling → officer decides
+
+export const RESCHEDULING_PATH_LABELS: Record<ReschedulingPath, { en: string; ar: string }> = {
+  RAISE_INSTALLMENT:         { en: 'Installment adjusted upward (within 20% cap)', ar: 'رفع قيمة القسط الشهري (ضمن سقف 20%)' },
+  REDUCE_INCREASE:           { en: 'Lighter increase applied (hardship household)', ar: 'تخفيض نسبة الرفع (أسرة ذات دخل منخفض)' },
+  MAINTAIN_INSTALLMENT:      { en: 'Current installment maintained', ar: 'الإبقاء على القسط الحالي' },
+  ROLL_ARREARS_TO_END:       { en: 'Arrears deferred to end of loan term', ar: 'تأجيل المتأخرات إلى نهاية مدة القرض' },
+  DEFER_TO_CIRCUMSTANCE_END: { en: 'Payment deferred until circumstance ends', ar: 'تأجيل السداد حتى انتهاء الظرف' },
+  REFER_HUMAN:               { en: 'Referred to a specialist officer', ar: 'الإحالة إلى الموظف المختص' },
+}
+
+export function selectReschedulingPath(input: {
+  unemployment: boolean
+  temporaryCircumstance: boolean
+  isHardship: boolean
+  incomeChanged: boolean
+  dbrWithinLimit: boolean
+  twentyPercentRulePass: boolean
+  arrearsPremium: number
+}): ReschedulingPath {
+  if (input.unemployment) return 'ROLL_ARREARS_TO_END'
+  if (input.temporaryCircumstance) return 'DEFER_TO_CIRCUMSTANCE_END'
+  if (!input.dbrWithinLimit) return 'REFER_HUMAN'
+  if (!input.twentyPercentRulePass || input.arrearsPremium <= 0) return 'MAINTAIN_INSTALLMENT'
+  if (input.isHardship || input.incomeChanged) return 'REDUCE_INCREASE'
+  return 'RAISE_INSTALLMENT'
 }
 
 export type RescheduleReason =
@@ -266,7 +305,15 @@ export function classifyRequestCircumstances(reason: string, freeText = ''): Req
 // exactly that when it is missing (it must NEVER reject for a missing document — it
 // routes back to the citizen as "Request Documents"). The required document depends on
 // the beneficiary's situation, read from the structured reason + free-text.
-export type DocumentType = 'salary_certificate' | 'non_work_letter' | 'income_statement' | 'supporting_document'
+export type DocumentType =
+  | 'salary_certificate'
+  | 'non_work_letter'
+  | 'income_statement'
+  | 'supporting_document'
+  | 'business_failure_certificate'
+  | 'salary_reduction_certificate'
+  | 'family_circumstances_certificate'
+  | 'medical_certificate'
 
 // A single citizen-facing document ask (the type SADDAD validates against + the label shown).
 export type DocSpec = { type: DocumentType; label: string }
@@ -285,9 +332,13 @@ export type RequiredDocuments = {
 
 const DOC_LABELS: Record<DocumentType, string> = {
   salary_certificate: 'A recent salary certificate (issued within the last 30 days)',
-  non_work_letter: 'An official non-work / termination letter from your employer or the labour authority (proof you no longer earn a salary)',
+  non_work_letter: 'A Job Loss Certificate — employer confirmation of termination, redundancy, contract completion or involuntary job loss (company letterhead, HR reference number, employment details, termination date, authorized signatory)',
   income_statement: 'A recent bank statement or income statement covering the last 3 months',
-  supporting_document: 'A supporting document for your circumstance',
+  supporting_document: 'A supporting document for your circumstance (e.g. an official assignment / secondment letter)',
+  business_failure_certificate: 'A Business Failure Certificate — official declaration of business closure, insolvency or financial distress (trade licence information, company details, reason for closure, authorized signatory)',
+  salary_reduction_certificate: 'A Salary Reduction Certificate from your employer (previous salary, revised salary, effective date, reason for reduction, HR authorization)',
+  family_circumstances_certificate: 'A Family Circumstances Certificate — supporting document explaining the exceptional family circumstances affecting your finances (family details, financial impact statement, issuing authority or organization details)',
+  medical_certificate: 'A Medical Condition Certificate — medical report or physician-issued certificate (hospital/clinic information, physician details, diagnosis summary, treatment period, official stamp/signature)',
 }
 
 function withCompat(primary: DocSpec, supporting: DocSpec | null): RequiredDocuments {
@@ -323,22 +374,26 @@ export function determineRequiredDocuments(input: {
   // still cross-checked against it during verification).
   const salaryCert: DocSpec = { type: 'salary_certificate', label: DOC_LABELS.salary_certificate }
 
-  // Reason-specific SUPPORTING document (requested only after the salary cert is valid).
+  // Reason-specific SUPPORTING document (requested only after the salary cert is
+  // valid). EVERY circumstance has its own certificate type with its own
+  // verification profile (anchors, OCR fields, vision brief) — see
+  // DOC_TYPE_PROFILES in lib/document-forensics.ts.
   let supporting: DocSpec | null = null
   if (reason === 'business_failure') {
-    supporting = { type: 'income_statement', label: DOC_LABELS.income_statement }
-  } else if (input.temporary_circumstance || reason === 'medical_expenses') {
+    supporting = { type: 'business_failure_certificate', label: DOC_LABELS.business_failure_certificate }
+  } else if (reason === 'medical_expenses') {
+    supporting = { type: 'medical_certificate', label: DOC_LABELS.medical_certificate }
+  } else if (input.temporary_circumstance) {
     supporting = {
       type: 'supporting_document',
       label: 'A medical report or official supporting document for your circumstance (e.g. a hospital report or an official assignment / secondment letter)',
     }
   } else if (input.income_changed || reason === 'salary_reduction') {
-    supporting = {
-      type: 'supporting_document',
-      label: 'An official employer letter confirming your salary reduction',
-    }
+    supporting = { type: 'salary_reduction_certificate', label: DOC_LABELS.salary_reduction_certificate }
+  } else if (reason === 'family_circumstances') {
+    supporting = { type: 'family_circumstances_certificate', label: DOC_LABELS.family_circumstances_certificate }
   }
-  // Stable employment / family circumstances / other → salary certificate only.
+  // Stable employment / other → salary certificate only.
   return withCompat(salaryCert, supporting)
 }
 
@@ -577,6 +632,15 @@ export function analyzeFinancials(
     dbr_cap,
     dbr_within_limit: dbr <= dbr_cap,
     is_retiree,
+    rescheduling_path: selectReschedulingPath({
+      unemployment,
+      temporaryCircumstance: temporary_circumstance,
+      isHardship: is_hardship,
+      incomeChanged: income_changed,
+      dbrWithinLimit: dbr <= dbr_cap,
+      twentyPercentRulePass: twenty_percent_rule_pass,
+      arrearsPremium: arrears_premium,
+    }),
   }
 }
 

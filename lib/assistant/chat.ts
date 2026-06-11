@@ -4,7 +4,7 @@
 //   • degrades gracefully (no GROQ key / LLM error) to an on-topic fallback
 // The API route stays thin and just hands user input + resolved case context here.
 
-import { getChatModel, isLLMConfigured } from '@/lib/llm/client'
+import { getFailoverChatModel, isLLMConfigured } from '@/lib/llm/client'
 import {
   assistantSystemPrompt,
   assistantFallbackReply,
@@ -76,7 +76,9 @@ export async function runAssistant({
   ]
 
   try {
-    const model = getChatModel({ temperature: 0.3, maxTokens: 500 })
+    // Full rotation failover + overall deadline: one rate-limited key can never
+    // degrade the assistant to the offline fallback while healthy slots remain.
+    const model = getFailoverChatModel({ temperature: 0.3, maxTokens: 500 })
     const res = await model.invoke(lcMessages)
     const content = res?.content
     const reply =

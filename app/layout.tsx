@@ -40,8 +40,11 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // suppressHydrationWarning on <html>: browser extensions inject attributes before
+  // React hydrates (e.g. foxified=""), and AccessibilityProvider legitimately sets
+  // lang/dir/class client-side from saved preferences — both are expected diffs.
   return (
-    <html lang="en" className={`${jakarta.variable} ${plexArabic.variable}`}>
+    <html lang="en" className={`${jakarta.variable} ${plexArabic.variable}`} suppressHydrationWarning>
       <body suppressHydrationWarning>
         <TTSProvider>
           <AccessibilityProvider>

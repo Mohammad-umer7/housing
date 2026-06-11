@@ -43,6 +43,10 @@ export type ExpectedDocType =
   | 'non_work_letter'
   | 'income_statement'
   | 'supporting_document'
+  | 'business_failure_certificate'
+  | 'salary_reduction_certificate'
+  | 'family_circumstances_certificate'
+  | 'medical_certificate'
 
 export type DocFieldSpec = {
   key: 'employeeName' | 'monthlySalary' | 'employerName' | 'issueDate'
@@ -126,6 +130,79 @@ export const DOC_TYPE_PROFILES: Record<ExpectedDocType, DocTypeProfile> = {
     minAnchors: 3,
     salaryBearing: false,
   },
+  business_failure_certificate: {
+    label: 'business failure / closure certificate',
+    geminiBrief:
+      'A genuine UAE business failure certificate is an official declaration or supporting document indicating business closure, insolvency, financial distress or commercial failure. It normally contains: the trade licence information, the company/establishment details, the owner\'s name, the reason for closure or distress, a date, and an authorised signatory or official stamp.',
+    fields: [
+      { key: 'employeeName', description: 'full name of the business owner the certificate concerns' },
+      { key: 'employerName', description: 'the business / company / establishment name' },
+      { key: 'issueDate', description: 'date of the declaration in DD/MM/YYYY format' },
+    ],
+    anchors: [
+      /trade\s+licen[cs]e|commercial\s+licen[cs]e|رخصة\s*تجارية/i,
+      /clos(ure|ed|ing)|insolven|bankrupt|liquidat|financial\s+distress|cease[ds]?\s+(trading|operations?)|wound\s+up|deregist|تعثر|إفلاس|إغلاق|تصفية/i,
+      /business|company|commercial|establishment|enterprise|l\.?l\.?c|نشاط\s*تجاري|شركة|مؤسسة/i,
+      /(authorized|authorised)\s+signatory|signature|stamp|seal|department\s+of\s+economic|chamber\s+of\s+commerce|توقيع|ختم/i,
+    ],
+    minAnchors: 2,
+    salaryBearing: false,
+  },
+  salary_reduction_certificate: {
+    label: 'salary reduction certificate',
+    geminiBrief:
+      'A genuine UAE salary reduction certificate is an employer-issued confirmation of a salary reduction. It normally contains: the company letterhead, the employee\'s name, the PREVIOUS salary, the REVISED (new) salary, the effective date of the reduction, the reason for the reduction, and an HR authorisation / authorised signatory.',
+    fields: [
+      { key: 'employeeName', description: 'full name of the employee' },
+      { key: 'monthlySalary', description: 'the REVISED (new, reduced) monthly salary as a plain number (no AED prefix, no commas)' },
+      { key: 'employerName', description: 'name of the company or employer' },
+      { key: 'issueDate', description: 'date of the letter in DD/MM/YYYY format' },
+    ],
+    anchors: [
+      /salary\s+reduction|reduc(ed|tion)\s+(of\s+|in\s+)?(the\s+)?salary|pay\s+cut|تخفيض\s*الراتب|خفض\s*الراتب/i,
+      /(previous|former|old|current)\s+salary|(revised|new|adjusted)\s+salary|الراتب\s*(السابق|الجديد|المعدل)/i,
+      /effective\s+(date|from)|with\s+effect\s+from|اعتبارًا\s*من|تاريخ\s*السريان/i,
+      /hr|human\s+resources|(authorized|authorised)\s+signatory|إدارة\s*الموارد\s*البشرية|توقيع/i,
+    ],
+    minAnchors: 2,
+    salaryBearing: false, // the revised salary intentionally differs from the on-record salary
+  },
+  family_circumstances_certificate: {
+    label: 'family circumstances certificate',
+    geminiBrief:
+      'A genuine family circumstances certificate is a supporting document explaining exceptional family circumstances affecting the applicant\'s financial situation (e.g. divorce decree, death certificate of a provider, guardianship/custody order, dependants documentation). It normally contains: the issuing authority or organisation (court, ministry, community authority), the relevant family details, a statement of the circumstance and its financial impact, a date, and an official reference or signatory.',
+    fields: [
+      { key: 'employeeName', description: 'full name of the person the certificate concerns' },
+      { key: 'employerName', description: 'the issuing authority, court or organisation' },
+      { key: 'issueDate', description: 'date of the document in DD/MM/YYYY format' },
+    ],
+    anchors: [
+      /family|household|dependent|dependant|divorce|death|widow|guardian|custody|marriage|أسر|عائل|طلاق|وفاة|حضانة|وصاية/i,
+      /circumstance|hardship|situation|support|financial\s+impact|welfare|ظروف|إعالة|دعم/i,
+      /court|authority|ministry|organi[sz]ation|community|judicial|federal|محكمة|هيئة|وزارة|مجتمع/i,
+      /date|reference|ref\.?\s*(no|number)|تاريخ|رقم\s*المرجع/i,
+    ],
+    minAnchors: 2,
+    salaryBearing: false,
+  },
+  medical_certificate: {
+    label: 'medical condition certificate',
+    geminiBrief:
+      'A genuine UAE medical condition certificate is a medical report or physician-issued certificate confirming a health condition affecting the applicant\'s financial capability. It normally contains: the hospital/clinic information, the physician\'s name and details, the patient\'s name, a diagnosis summary, the treatment period, a date, and an official stamp or signature (MOH / DHA / DoH licensed facility).',
+    fields: [
+      { key: 'employeeName', description: 'full name of the patient the certificate concerns' },
+      { key: 'employerName', description: 'the hospital, clinic or medical facility name' },
+      { key: 'issueDate', description: 'date of the report in DD/MM/YYYY format' },
+    ],
+    anchors: [
+      /medical|hospital|clinic|patient|physician|doctor|dr\.|طبي|مستشفى|عيادة|طبيب/i,
+      /diagnos|treatment|condition|illness|disease|surgery|therapy|sick\s+leave|تشخيص|علاج|حالة\s*صحية|مرض/i,
+      /stamp|seal|signature|licen[cs]e|moh|dha|doh|ministry\s+of\s+health|ختم|توقيع|وزارة\s*الصحة/i,
+      /date|period|from|to|تاريخ|فترة/i,
+    ],
+    minAnchors: 2,
+    salaryBearing: false,
+  },
   supporting_document: {
     label: 'supporting document (e.g. medical report or official assignment letter)',
     geminiBrief:
@@ -175,6 +252,7 @@ export type VerificationReport = {
   authorityName: string | null
   authoritySalary: number | null
   expectedType: ExpectedDocType
+  uaePipelineScore?: UAEPipelineScore // 100-point UAE verification pipeline score
 }
 
 // ── Vision LLM authenticity (Gemini) ──────────────────────────────────────────
@@ -271,6 +349,210 @@ export function extractIban(pdfText: string): string | null {
 export function extractAccountNumber(pdfText: string): string | null {
   const m = (pdfText || '').match(/account\s*(?:number|no\.?|#)?\s*[:\-]?\s*([0-9][0-9\- ]{6,30})/i)
   return m ? m[1].trim().replace(/[ ]+$/, '') : null
+}
+
+// ── Reference number extraction (for the duplicate-ref fraud check) ────────────
+// UAE government/corporate reference format: ORG/DEPT/YYYY/NNNN (e.g. GT/HR/2026/8841).
+export function extractRefNumber(pdfText: string): string | null {
+  const m = (pdfText || '').match(/\b([A-Z]{1,10}\/[A-Z]{1,10}\/20\d{2}\/\d{3,8})\b/)
+  return m ? m[1] : null
+}
+
+// ── Format validators ──────────────────────────────────────────────────────────
+// UAE Emirates ID: 784-YYYY-XXXXXXX-C (3-4-7-1 groups, exactly 15 digits)
+export function validateEmiratesIdFormat(eid: string | null): boolean {
+  if (!eid) return false
+  return /^784-\d{4}-\d{7}-\d$/.test(eid.trim())
+}
+
+// UAE government reference number: ORG/DEPT/YYYY/NNNN
+export function validateRefNumberFormat(ref: string | null): boolean {
+  if (!ref) return false
+  return /^[A-Z]{1,10}\/[A-Z]{1,10}\/20\d{2}\/\d{3,8}$/.test(ref.trim())
+}
+
+// Issue date must not be in the future (a cert issued "tomorrow" is fabricated)
+export function validateDateNotFuture(dateStr: string | null): boolean {
+  if (!dateStr) return true
+  const parsed = new Date(dateStr)
+  if (isNaN(parsed.getTime())) return true
+  return parsed <= new Date()
+}
+
+// UAE phone: +971XXXXXXXX, 971XXXXXXXX, or 0XXXXXXXXX (8–9 digits after prefix)
+export function validatePhoneUAE(phone: string | null): boolean {
+  if (!phone) return true
+  const clean = phone.replace(/[\s\-.()]/g, '')
+  return /^\+971\d{8,9}$/.test(clean) || /^971\d{8,9}$/.test(clean) || /^0[0-9]{8,9}$/.test(clean)
+}
+
+// ── PDF metadata forensics ─────────────────────────────────────────────────────
+// Parse the PDF binary header for creation and modification timestamps.
+// A document whose ModDate is more than 1 year after its CreationDate is suspicious
+// (it was likely opened and edited after being originally issued).
+export function checkPdfMetadata(buffer: Buffer): {
+  creationYear: number | null
+  modificationYear: number | null
+  suspicious: boolean
+  reason: string | null
+} {
+  const raw = buffer.toString('latin1', 0, Math.min(buffer.length, 65536))
+  const cm = raw.match(/\/CreationDate\s*\(D:(\d{4})/)
+  const mm = raw.match(/\/ModDate\s*\(D:(\d{4})/)
+  const creationYear = cm ? parseInt(cm[1], 10) : null
+  const modificationYear = mm ? parseInt(mm[1], 10) : null
+  if (creationYear !== null && modificationYear !== null && modificationYear > creationYear + 1) {
+    return {
+      creationYear, modificationYear, suspicious: true,
+      reason: `Document created in ${creationYear} but last modified in ${modificationYear} — possible post-issuance tampering`,
+    }
+  }
+  return { creationYear, modificationYear, suspicious: false, reason: null }
+}
+
+// ── Font consistency ────────────────────────────────────────────────────────────
+// Text injected into an existing PDF (copy-paste fraud) leaves a foreign font family.
+// Legitimate salary certificates typically use 1–3 fonts; >3 distinct base font
+// families in a simple certificate is a strong injection signal.
+export function checkFontConsistency(buffer: Buffer): {
+  fontCount: number
+  suspicious: boolean
+} {
+  const raw = buffer.toString('latin1', 0, Math.min(buffer.length, 131072))
+  const fonts = new Set(
+    [...raw.matchAll(/\/BaseFont\s*\/([^\s\/\[\]()]+)/g)].map(m => m[1].replace(/^\w+\+/, ''))
+  )
+  return { fontCount: fonts.size, suspicious: fonts.size > 3 }
+}
+
+// ── Multi-channel OCR reconciliation ───────────────────────────────────────────
+// Compares the embedded PDF text layer (direct extraction) to rendered OCR output.
+// A delta > 50 characters in the first 500 means the visual layer was altered after
+// the text layer was set — a strong copy-paste / image-swap signal.
+export function reconcileOcrChannels(embeddedText: string, renderedText: string): {
+  delta: number
+  suspicious: boolean
+} {
+  if (!embeddedText || !renderedText) return { delta: 0, suspicious: false }
+  const a = embeddedText.replace(/\s+/g, ' ').trim()
+  const b = renderedText.replace(/\s+/g, ' ').trim()
+  const len = Math.min(a.length, b.length, 500)
+  let diff = Math.abs(a.length - b.length)
+  for (let i = 0; i < len; i++) if (a[i] !== b[i]) diff++
+  return { delta: diff, suspicious: diff > 50 }
+}
+
+// ── UAE Pipeline 100-point weighted scoring ────────────────────────────────────
+// Maps the verification report to the official UAE AI Certificate Verification
+// Pipeline scoring model (Section 4 of the UAE Pipeline spec):
+//   Schema/Format Validation  (15) — EID format, ref format, date, phone
+//   Arithmetic Check          (20) — basic + allowances = gross
+//   Rule Engine               (20) — all field match checks
+//   LLM Semantic Risk         (20) — vision authenticity + hash integrity
+//   Database Match            (15) — authority record + salary cross-check
+//   Visual Forgery Detection  (10) — PDF metadata, fonts, OCR reconciliation
+//   TOTAL                    (100)
+//
+// verdict: REAL ≥ 80 · REVIEW 60–79 · FAKE < 60
+
+export type UAEPipelineScore = {
+  schemaValidation: number   // 0–15
+  arithmeticCheck:  number   // 0–20
+  ruleEngine:       number   // 0–20
+  llmSemanticRisk:  number   // 0–20
+  databaseMatch:    number   // 0–15
+  visualForgery:    number   // 0–10
+  total:            number   // 0–100
+  verdict:          'REAL' | 'REVIEW' | 'FAKE'
+  breakdown:        string[]
+}
+
+export function buildWeightedScore(
+  report: VerificationReport,
+  extras?: {
+    pdfMetadataSuspicious?: boolean
+    fontsSuspicious?:       boolean
+    ocrDeltaSuspicious?:    boolean
+    eidFormatPass?:         boolean
+    refFormatPass?:         boolean
+    dateNotFuture?:         boolean
+  }
+): UAEPipelineScore {
+  const checks = report.checks
+  const get = (id: string) => checks.find(c => c.id === id)
+
+  // THE TYPE GATE DOMINATES: when the uploaded file is not the requested document
+  // type, the content checks are all N/A — partial "benefit of the doubt" credit
+  // must NOT add up to a high score for a file we could not actually verify.
+  const wrongType = get('document_type')?.status === 'fail' || report.verdict === 'invalid'
+
+  // Schema / Format (15): EID format + ref format + date validity
+  const eidFmt  = extras?.eidFormatPass  !== false ? 5 : 0
+  const refFmt  = extras?.refFormatPass  !== false ? 5 : 0
+  const dateFmt = extras?.dateNotFuture  !== false ? 5 : 0
+  const schemaValidation = eidFmt + refFmt + dateFmt
+
+  // Arithmetic (20): internal salary reconciliation. No partial credit on a
+  // wrong-type file — its figures were never evaluated.
+  const arith = get('arithmetic')
+  const arithmeticCheck = wrongType ? 0
+    : !arith || arith.status === 'na' ? 15
+    : arith.status === 'pass' ? 20 : 0
+
+  // Rule Engine (20): field-match checks across all applicable dimensions.
+  // Zero on a wrong-type file — the fields could not be cross-checked at all.
+  const ruleIds = ['emirates_id_match', 'name_match', 'employer_match', 'account_match', 'date_chronology', 'ref_uniqueness']
+  const applicable = ruleIds.filter(id => get(id)?.status !== 'na')
+  const passed     = applicable.filter(id => get(id)?.status === 'pass')
+  const ruleEngine = wrongType ? 0
+    : applicable.length === 0 ? 15
+    : Math.round((passed.length / applicable.length) * 20)
+
+  // LLM Semantic Risk (20): vision authenticity + cryptographic hash integrity
+  const vision = get('vision_authenticity')
+  const hash   = get('hash_integrity')
+  const visionScore = !vision || vision.status === 'na' ? 10 : vision.status === 'pass' ? 10 : 0
+  const hashScore   = !hash   || hash.status   === 'na' ? 10 : hash.status   === 'pass' ? 10 : 0
+  const llmSemanticRisk = visionScore + hashScore
+
+  // Database Match (15): authority record existence + salary cross-check
+  const authRec = get('authority_record')
+  const salaryM = get('salary_match')
+  const dbAuth  = !authRec || authRec.status === 'na' ? 7 : authRec.status === 'pass' ? 8 : 0
+  const dbSal   = !salaryM || salaryM.status  === 'na' ? 7 : salaryM.status  === 'pass' ? 7 : 0
+  const databaseMatch = Math.min(15, dbAuth + dbSal)
+
+  // Visual Forgery (10): metadata timestamps, font families, OCR channel reconciliation
+  const metaOk = !extras?.pdfMetadataSuspicious ? 4 : 0
+  const fontOk = !extras?.fontsSuspicious        ? 3 : 0
+  const ocrOk  = !extras?.ocrDeltaSuspicious     ? 3 : 0
+  const visualForgery = metaOk + fontOk + ocrOk
+
+  let total = schemaValidation + arithmeticCheck + ruleEngine + llmSemanticRisk + databaseMatch + visualForgery
+  // Verdict-consistency caps: the 100-point score can never contradict the
+  // forensic verdict (e.g. "invalid" must not display as 92/100 REAL).
+  //   wrong type      → FAKE band (the requested document was not provided)
+  //   hash_tampered   → FAKE band (cryptographic proof of post-issuance editing)
+  //   suspicious      → REVIEW band at best (vision flagged a likely fake)
+  //   mismatch/tampered → REVIEW band at best (field fraud signals)
+  if (wrongType) total = Math.min(total, 45)
+  else if (report.verdict === 'hash_tampered') total = Math.min(total, 40)
+  else if (report.verdict === 'suspicious') total = Math.min(total, 65)
+  else if (report.verdict === 'mismatch' || report.verdict === 'tampered') total = Math.min(total, 70)
+  const verdict: UAEPipelineScore['verdict'] = total >= 80 ? 'REAL' : total >= 60 ? 'REVIEW' : 'FAKE'
+
+  const breakdown = [
+    `Schema/Format:  ${schemaValidation}/15`,
+    `Arithmetic:     ${arithmeticCheck}/20`,
+    `Rule Engine:    ${ruleEngine}/20`,
+    `LLM Semantic:   ${llmSemanticRisk}/20`,
+    `Database Match: ${databaseMatch}/15`,
+    `Visual Forgery: ${visualForgery}/10`,
+    ...(wrongType ? ['Type gate FAILED — not the requested document; score capped below the REVIEW band'] : []),
+    `Total:          ${total}/100  →  ${verdict}`,
+  ]
+
+  return { schemaValidation, arithmeticCheck, ruleEngine, llmSemanticRisk, databaseMatch, visualForgery, total, verdict, breakdown }
 }
 
 const norm = (s: string | null | undefined) =>

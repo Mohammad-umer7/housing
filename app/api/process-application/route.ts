@@ -9,12 +9,13 @@ import {
   addToQueue,
   upsertCase,
   initAgentSteps,
+  checkRefNumberUniqueness,
 } from '@/lib/data-layer'
 import { baseApplicationId } from '@/lib/integrations/source-systems'
-import { requireAuth, checkRateLimit } from '@/lib/middleware/auth'
+import { requireAuth, checkRateLimit, checkEidRateLimit } from '@/lib/middleware/auth'
 import { successResponse, errorResponse } from '@/lib/api-response'
 import { extractTextFromPDF, extractDocumentFields } from '@/lib/pdf-extractor'
-import { checkStructure, checkArithmetic, extractEmiratesId, extractIban, extractAccountNumber } from '@/lib/document-forensics'
+import { checkStructure, checkArithmetic, extractEmiratesId, extractIban, extractAccountNumber, extractRefNumber, checkPdfMetadata, checkFontConsistency, validateEmiratesIdFormat, validatePhoneUAE } from '@/lib/document-forensics'
 import { checkHashIntegrity } from '@/lib/doc-hash-verify'
 import { classifyRequestCircumstances, determineRequiredDocuments } from '@/governance/housing-arrears'
 
@@ -103,11 +104,25 @@ export async function POST(req: NextRequest) {
     if (typeof case_number !== 'string' || case_number.length > 50) {
       return NextResponse.json(errorResponse('Invalid case number format', 400), { status: 400 })
     }
+    // Emirates ID rate limiting — max 3 submissions per EID in 24 hours
+    if (emirates_id && !checkEidRateLimit(emirates_id)) {
+      return NextResponse.json(
+        errorResponse('Too many submissions from this Emirates ID. Please wait 24 hours before submitting again.', 429),
+        { status: 429 }
+      )
+    }
+
+    // UAE format validation — flag misformatted identifiers before any DB work
+    const eidFormatValid   = validateEmiratesIdFormat(emirates_id || null)
+    const phoneFormatValid = validatePhoneUAE(phone || null)
+
     // Real PDF extraction + document forensics setup
     let extractedPdfText = ''
     let pdfBase64: string | null = null
     let arrayBuffer: ArrayBuffer | null = null
     const documentUploaded = !!salaryCertFile
+    let pdfMetadata: ReturnType<typeof checkPdfMetadata> | null = null
+    let fontConsistency: ReturnType<typeof checkFontConsistency> | null = null
 
     let supportingExtractedText = ''
     let pdfSupportingBase64: string | null = null
@@ -118,6 +133,9 @@ export async function POST(req: NextRequest) {
       const pdfBuf = Buffer.from(arrayBuffer.slice(0))
       extractedPdfText = await extractTextFromPDF(arrayBuffer)
       if (pdfBuf.byteLength <= 4 * 1024 * 1024) pdfBase64 = pdfBuf.toString('base64')
+      // PDF forensics — run synchronously on the already-loaded buffer
+      pdfMetadata    = checkPdfMetadata(pdfBuf)
+      fontConsistency = checkFontConsistency(pdfBuf)
     }
 
     let uploadedDocType: string | undefined = undefined
@@ -180,6 +198,8 @@ export async function POST(req: NextRequest) {
     let pdfExtractedEid: string | null = null
     let pdfExtractedIban: string | null = null
     let pdfExtractedAccount: string | null = null
+    let pdfExtractedRefNumber: string | null = null
+    let refNumberUnique = true
 
     if (salaryCertFile && arrayBuffer) {
       // Three-tier OCR (Groq → Gemini Vision → regex fallback), doc-type aware: the
@@ -196,6 +216,12 @@ export async function POST(req: NextRequest) {
       pdfExtractedEid = extractEmiratesId(extractedPdfText)
       pdfExtractedIban = extractIban(extractedPdfText)
       pdfExtractedAccount = extractAccountNumber(extractedPdfText)
+      // Duplicate-reference fraud check: the same cert reference number appearing in
+      // ANOTHER beneficiary's submission means a copied/altered document.
+      pdfExtractedRefNumber = extractRefNumber(extractedPdfText)
+      if (pdfExtractedRefNumber) {
+        refNumberUnique = await checkRefNumberUniqueness(pdfExtractedRefNumber, case_number, emirates_id)
+      }
     }
 
     // Cryptographic hash integrity — detects any text modification after issuance.
@@ -303,6 +329,15 @@ export async function POST(req: NextRequest) {
       // Unified document manifest (all uploaded files with metadata)
       requestDescription,
       attachedDocuments,
+      // UAE format validation signals (passed to document agent for scoring)
+      eidFormatValid,
+      phoneFormatValid,
+      // PDF forensic pre-scan signals (timestamp + font analysis)
+      pdfMetadata,
+      fontConsistency,
+      // Duplicate-reference fraud signal (cross-beneficiary DB check)
+      pdfExtractedRefNumber,
+      refNumberUnique,
     }
 
     // TESTING ONLY — clean any stale rows for this exact case number (no-op for a fresh

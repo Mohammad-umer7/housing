@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { runAssistant, type ChatMessage } from '@/lib/assistant/chat'
 import type { AssistantCaseContext, AssistantStatsContext, AudiencePortal } from '@/lib/assistant/knowledge'
 import { readSessionFromCookieHeader } from '@/lib/auth/session'
-import { getCaseByCaseNumber, getJobStatus, getCaseStats, getSystemSetting } from '@/lib/data-layer'
+import { getLatestCaseForBaseAppId, getJobStatus, getCaseStats, getSystemSetting } from '@/lib/data-layer'
 import { getApplicant } from '@/lib/integrations/source-systems'
 import { supabaseAdmin } from '@/lib/supabase'
 import { checkRateLimit } from '@/lib/middleware/auth'
@@ -65,20 +65,34 @@ export async function POST(req: NextRequest) {
       }
     }
     try {
-      const [caseRow, job] = await Promise.all([
-        getCaseByCaseNumber(authorizedCaseNumber),
-        getJobStatus(authorizedCaseNumber),
-      ])
+      // Resolve to the LATEST submission: citizens track the base Application ID,
+      // but every re-submission is its own "-rN" case — answering from the base
+      // row would describe a stale, superseded decision.
+      const caseRow = await getLatestCaseForBaseAppId(authorizedCaseNumber)
+      const latestCaseNumber = caseRow ? String(caseRow.case_number) : authorizedCaseNumber
+      const job = await getJobStatus(latestCaseNumber)
       if (caseRow) {
-        const terminal = TERMINAL.includes(caseRow.status)
+        const status = String(caseRow.status ?? '')
+        const terminal = TERMINAL.includes(status)
+        const cs = (caseRow.case_study && typeof caseRow.case_study === 'object'
+          ? caseRow.case_study : null) as Record<string, unknown> | null
+        const vr = (caseRow.verification_report && typeof caseRow.verification_report === 'object'
+          ? caseRow.verification_report : null) as Record<string, unknown> | null
+        const pendingDoc = cs?.pendingSupportingDoc as { label?: string } | null
         caseContext = {
-          caseNumber: authorizedCaseNumber,
+          caseNumber: latestCaseNumber,
           fullName,
-          status: job?.status ?? caseRow.status ?? null,
-          decision: terminal ? caseRow.status : null,
-          monthlyPayment: terminal ? caseRow.monthly_payment ?? null : null,
-          durationMonths: terminal ? caseRow.duration_months ?? null : null,
-          rationale: terminal ? caseRow.decision_reason ?? null : null,
+          status: job?.status ?? status ?? null,
+          decision: terminal ? status : null,
+          monthlyPayment: terminal ? (caseRow.monthly_payment as number | null) ?? null : null,
+          durationMonths: terminal ? (caseRow.duration_months as number | null) ?? null : null,
+          rationale: terminal ? (caseRow.decision_reason as string | null) ?? null : null,
+          totalNewMonthly: terminal ? (caseRow.total_new_monthly_payment as number | null) ?? null : null,
+          recommendation: terminal && cs?.recommendation ? String(cs.recommendation) : null,
+          riskLevel: terminal && caseRow.risk_level ? String(caseRow.risk_level) : null,
+          verificationVerdict: terminal && vr?.verdict ? String(vr.verdict) : null,
+          reschedulingPathLabel: terminal && cs?.reschedulingPathLabel ? String(cs.reschedulingPathLabel) : null,
+          pendingDocument: pendingDoc?.label ? String(pendingDoc.label) : null,
         }
       } else {
         // A known beneficiary with no case row simply has not applied yet — say so

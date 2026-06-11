@@ -33,6 +33,46 @@ const ROLE_META: Record<RoleKey, { label: string; sublabel: string; placeholder:
   },
 }
 
+// Ready-made instruction templates an admin can insert with one click and then edit.
+// Grounded in the SZHP/MOEI rules the pipeline actually enforces.
+const SUGGESTED_TEMPLATES: Record<RoleKey, string> = {
+  citizen: `TONE & BEHAVIOUR
+- Greet citizens warmly and use simple, reassuring language. Never use legal jargon without explaining it.
+- Always remind citizens that submitting a request is free and a decision is usually issued within minutes, not days.
+
+RULES TO QUOTE ACCURATELY
+- The total monthly deduction (existing installment + arrears premium) can never exceed 20% of income.
+- The repayment period can never exceed the original approved loan period.
+- Families with average income per member below AED 2,500/month receive a lighter plan (~15% target).
+- Job loss: arrears are moved to the end of the loan with NO installment increase — an official termination/non-work letter is required.
+- Medical or temporary circumstances: payments can be deferred until the circumstance ends — a medical report or official letter is required.
+
+DOCUMENTS
+- A salary certificate must be issued within the last 30 days.
+- If a document is rejected, explain exactly which document is needed and why — never blame the citizen.`,
+  officer: `REVIEW GUIDANCE
+- Always state WHICH governance rule (G-00…G-07) triggered the escalation before discussing the case.
+- For borderline 20%-rule cases, check whether a hardship reclassification (per-member income < AED 2,500) makes a lighter plan compliant.
+- For document-verification flags (mismatch / suspicious / tampered / hash_tampered), summarise the specific failing checks and the 100-point score breakdown — never approve a flagged document without inspecting it.
+- A fraud signal (duplicate reference number, salary mismatch vs authority record) must never be auto-rejected — document the evidence in the decision note.
+
+POLICY REMINDERS
+- Deduction cap: 20% of income (15% target for hardship households). Period cap: the original loan period. DBR ceiling: 60% (50% retirees).
+- Priority beneficiaries (widow, orphan, senior, person of determination) are assessed identically — priority only affects queue order.
+- Every manual decision requires a written note; it is recorded in the immutable audit log and sent to the citizen.`,
+  admin: `OPERATIONS GUIDANCE
+- When asked about programme statistics, quote the live dashboard numbers provided in context — never estimate.
+- Threshold changes in Settings → Rules apply to NEW submissions immediately and never recalculate existing decisions; recommend documenting a change-request reference in the note.
+- For audit questions, point to the per-case audit trail (immutable log with rule, rationale, model and timestamp).
+
+GOVERNANCE SUMMARY (for quick reference)
+- G-00 duplicate active application → Reject · G-01 missing income proof → Request Documents
+- G-02 stale certificate (>30 days) → Escalate · G-03 20% deduction rule → Escalate
+- G-04 repayment period rule → Escalate · G-05 prior default → Escalate
+- G-06 no Direct Debit Authority → Reject (enrol with EDB) · G-07 DBR ceiling (60%/50%) → Escalate
+- Document verdicts: verified / mismatch / suspicious / tampered / hash_tampered / invalid / unverifiable.`,
+}
+
 // ── Rules ─────────────────────────────────────────────────────────────────────
 
 type RuleValues = {
@@ -297,9 +337,20 @@ export default function AdminSettingsPage() {
                     </div>
                   </div>
 
-                  <label className="muted" style={{ fontSize: 12, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase', display: 'block', marginBottom: 8 }}>
-                    {t('Custom Instructions', 'تعليمات مخصصة')}
-                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8, flexWrap: 'wrap' }}>
+                    <label className="muted" style={{ fontSize: 12, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase' }}>
+                      {t('Custom Instructions', 'تعليمات مخصصة')}
+                    </label>
+                    <button className="btn btn-neutral" style={{ fontSize: 12.5, padding: '6px 12px' }}
+                      onClick={() => setInstructions(prev => ({
+                        ...prev,
+                        [role]: prev[role].trim()
+                          ? `${prev[role].trimEnd()}\n\n${SUGGESTED_TEMPLATES[role]}`
+                          : SUGGESTED_TEMPLATES[role],
+                      }))}>
+                      ✨ {t('Insert suggested template', 'إدراج القالب المقترح')}
+                    </button>
+                  </div>
                   <textarea
                     className="input"
                     value={instructions[role]}
@@ -315,6 +366,20 @@ export default function AdminSettingsPage() {
                     <span className="mono" style={{ fontSize: 12, color: instructions[role].length > 3800 ? 'var(--amber)' : 'var(--muted)' }}>
                       {instructions[role].length}/4000
                     </span>
+                  </div>
+
+                  {/* Per-tab save row — saves ALL three roles' instructions at once */}
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--line)' }}>
+                    {chatbotDirty && (
+                      <button className="btn btn-neutral" style={{ padding: '10px 18px' }} disabled={chatbotSaving}
+                        onClick={() => setInstructions({ ...savedInstructions })}>
+                        {t('Discard')}
+                      </button>
+                    )}
+                    <button className="btn btn-primary" style={{ padding: '10px 22px' }} disabled={chatbotSaving || !chatbotDirty}
+                      onClick={saveChatbot}>
+                      {chatbotSaving ? t('Saving…') : t('Save Changes', 'حفظ التغييرات')}
+                    </button>
                   </div>
                 </div>
               )
@@ -418,6 +483,22 @@ export default function AdminSettingsPage() {
               </div>
             ))
           )}
+
+          {/* Per-tab save row — saves all governance threshold changes */}
+          {!rulesLoading && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10 }}>
+              {rulesDirty && (
+                <button className="btn btn-neutral" style={{ padding: '10px 18px' }} disabled={rulesSaving}
+                  onClick={() => setRuleInputs({ ...savedRuleInputs })}>
+                  {t('Discard')}
+                </button>
+              )}
+              <button className="btn btn-primary" style={{ padding: '10px 22px' }} disabled={rulesSaving || !rulesDirty}
+                onClick={saveRules}>
+                {rulesSaving ? t('Saving…') : t('Save Changes', 'حفظ التغييرات')}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -425,6 +506,17 @@ export default function AdminSettingsPage() {
       {section === 'accessibility' && (
         <div className="card card-pad">
           <AccessibilitySettings />
+          {/* Accessibility preferences persist to this device the moment they change —
+              the save button confirms it so every tab behaves consistently. */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginTop: 18, paddingTop: 16, borderTop: '1px solid var(--line)', flexWrap: 'wrap' }}>
+            <p className="muted" style={{ fontSize: 12.5 }}>
+              {t('Preferences apply instantly and are stored on this device.', 'تُطبَّق التفضيلات فورًا وتُحفظ على هذا الجهاز.')}
+            </p>
+            <button className="btn btn-primary" style={{ padding: '10px 22px' }}
+              onClick={() => setFlash(t('Accessibility preferences saved.', 'تم حفظ تفضيلات إمكانية الوصول.'))}>
+              {t('Save Changes', 'حفظ التغييرات')}
+            </button>
+          </div>
         </div>
       )}
 

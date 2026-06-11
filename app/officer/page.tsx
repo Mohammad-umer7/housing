@@ -48,6 +48,9 @@ type EscalatedCase = {
 
 type ActionState = { caseNumber: string; action: 'APPROVE' | 'REJECT'; notes: string } | null
 
+type DocEntry = { index: number; role: 'primary' | 'supporting' | 'additional'; filename: string; mimeType: string; description: string; size: number }
+type DocManifest = { requestDescription: string | null; documents: DocEntry[] }
+
 const riskPill: Record<string, string> = {
   LOW: 'pill-green', MEDIUM: 'pill-amber', HIGH: 'pill-amber', CRITICAL: 'pill-red',
 }
@@ -66,6 +69,24 @@ export default function OfficerPage() {
   const [actionState, setActionState] = useState<ActionState>(null)
   const [submitting, setSubmitting] = useState(false)
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
+  // Uploaded documents, fetched lazily per case the first time the officer expands them.
+  const [docsByCase, setDocsByCase] = useState<Record<string, DocManifest | 'loading' | 'error'>>({})
+  const [docsOpen, setDocsOpen] = useState<Record<string, boolean>>({})
+
+  async function toggleDocs(caseNumber: string) {
+    const next = !docsOpen[caseNumber]
+    setDocsOpen(prev => ({ ...prev, [caseNumber]: next }))
+    if (next && !docsByCase[caseNumber]) {
+      setDocsByCase(prev => ({ ...prev, [caseNumber]: 'loading' }))
+      try {
+        const res = await fetch(`/api/officer/cases/${encodeURIComponent(caseNumber)}/document?list=1`, { credentials: 'include', cache: 'no-store' })
+        const json = await res.json()
+        setDocsByCase(prev => ({ ...prev, [caseNumber]: json.success ? json.data : 'error' }))
+      } catch {
+        setDocsByCase(prev => ({ ...prev, [caseNumber]: 'error' }))
+      }
+    }
+  }
 
   async function loadCases() {
     try {
@@ -194,6 +215,20 @@ export default function OfficerPage() {
                       </div>
                     </div>
 
+                    {/* Why the AI did not auto-approve — the exact governance rule that
+                        forced this case to a human, straight from the audit log. */}
+                    {c.rule_triggered && (
+                      <div style={{ margin: '14px 28px 4px', padding: '12px 16px', background: 'var(--amber-soft)', border: '1px solid rgba(183,121,31,.3)', borderRadius: 'var(--r)', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                        <Ico.warn width={17} height={17} style={{ color: 'var(--amber)', flexShrink: 0, marginTop: 1 }} />
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--amber)', marginBottom: 3 }}>
+                            {t('Why this case requires manual review', 'سبب الإحالة للمراجعة اليدوية')}
+                          </div>
+                          <p style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.5 }}>{c.rule_triggered}</p>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="analysis-grid">
                       <div className="analysis-col en">
                         <div className="lbl"><span>{t('AI Analysis (English)')}</span>{c.decision_reason && <span className="spk"><SpeakerButton text={c.decision_reason} lang="en" /></span>}</div>
@@ -203,6 +238,52 @@ export default function OfficerPage() {
                         <div className="lbl" style={{ direction: 'rtl' }}><span>التحليل بالعربية</span>{c.rationale_ar && <span className="spk"><SpeakerButton text={c.rationale_ar} lang="ar" /></span>}</div>
                         <p>{c.rationale_ar || '—'}</p>
                       </div>
+                    </div>
+
+                    {/* Uploaded documents — view & download everything the citizen submitted */}
+                    <div style={{ padding: '0 28px 14px' }}>
+                      <button className="btn btn-neutral" style={{ fontSize: 13, padding: '7px 14px' }} onClick={() => toggleDocs(c.case_number)}>
+                        <Ico.doc2 width={15} height={15} /> {docsOpen[c.case_number] ? t('Hide Documents', 'إخفاء المستندات') : t('View Uploaded Documents', 'عرض المستندات المرفوعة')}
+                      </button>
+                      {docsOpen[c.case_number] && (() => {
+                        const manifest = docsByCase[c.case_number]
+                        if (manifest === 'loading' || !manifest) return <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>{t('Loading documents…', 'جارٍ تحميل المستندات…')}</p>
+                        if (manifest === 'error') return <p style={{ fontSize: 13, marginTop: 10, color: 'var(--red)' }}>{t('Failed to load documents.')}</p>
+                        if (manifest.documents.length === 0) return <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>{t('No documents were uploaded for this case.')}</p>
+                        return (
+                          <div style={{ marginTop: 10, display: 'grid', gap: 8, maxHeight: 320, overflowY: 'auto' }}>
+                            {manifest.requestDescription && (
+                              <div style={{ background: 'var(--blue-soft)', border: '1px solid #cdddef', borderRadius: 'var(--r-sm)', padding: '9px 12px', fontSize: 13 }}>
+                                <span style={{ fontWeight: 800, color: 'var(--blue)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '.06em', display: 'block', marginBottom: 3 }}>{t('Citizen Request', 'طلب المواطن')}</span>
+                                {manifest.requestDescription}
+                              </div>
+                            )}
+                            {manifest.documents.map(doc => {
+                              const docUrl = `/api/officer/cases/${encodeURIComponent(c.case_number)}/document?index=${doc.index}`
+                              const roleLabel = doc.role === 'primary' ? t('Primary') : doc.role === 'supporting' ? t('Supporting') : t('Additional')
+                              const rolePill = doc.role === 'primary' ? 'pill-gold' : doc.role === 'supporting' ? 'pill-blue' : 'pill-gray'
+                              const sizeKb = doc.size > 0 ? ` · ${(doc.size / 1024).toFixed(0)} KB` : ''
+                              return (
+                                <div key={doc.index} style={{ border: '1px solid var(--line)', borderRadius: 'var(--r-sm)', padding: '10px 12px', background: 'var(--panel-alt)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                                  <Ico.doc2 width={15} height={15} style={{ color: 'var(--gold)', flexShrink: 0 }} />
+                                  <div style={{ flex: 1, minWidth: 180 }}>
+                                    <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.filename}</div>
+                                    <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+                                      <span className={'pill ' + rolePill} style={{ fontSize: 10.5, padding: '1px 6px' }}>{roleLabel}</span>
+                                      <span style={{ marginInlineStart: 6 }}>{doc.mimeType}{sizeKb}</span>
+                                    </div>
+                                    {doc.description && <p style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 4 }}>{doc.description}</p>}
+                                  </div>
+                                  <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                                    <a className="btn btn-neutral" style={{ fontSize: 12.5, padding: '6px 11px' }} href={docUrl} target="_blank" rel="noreferrer">{t('View', 'عرض')}</a>
+                                    <a className="btn btn-neutral" style={{ fontSize: 12.5, padding: '6px 11px' }} href={`${docUrl}&download=1`} download>↓ {t('Download', 'تنزيل')}</a>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )
+                      })()}
                     </div>
 
                     {c.monthly_payment && (
