@@ -102,10 +102,12 @@ export const DOC_TYPE_PROFILES: Record<ExpectedDocType, DocTypeProfile> = {
     ],
     anchors: [
       // Core signals only — generic anchors (Emirates ID / date / HR) would let a
-      // salary certificate satisfy this profile by accident.
-      /terminat|end\s+of\s+service|cessation|cancellation\s+of\s+employment|resign|dismiss/i,
-      /unemploy|non-?work|not\s+(currently\s+)?employed|no\s+longer\s+employed|out\s+of\s+work|no\s+(stable\s+)?income/i,
-      /labou?r|human\s+resources|hr\s+department|ministry|authority/i,
+      // salary certificate satisfy this profile by accident. Covers all real-world
+      // variants: termination, redundancy, contract completion/expiry, involuntary
+      // separation (per the official Job Loss Certificate spec).
+      /terminat|end\s+of\s+service|cessation|cancellation\s+of\s+employment|resign|dismiss|redundan|separation|contract\s+(completion|expiry|expired|ended?)|completion\s+of\s+the\s+(fixed-?term\s+)?contract|last\s+working\s+day|involuntary|إنهاء\s*الخدمة|انتهاء\s*العقد|فقدان\s*العمل/i,
+      /unemploy|non-?work|not\s+(currently\s+)?employed|no\s+longer\s+employed|out\s+of\s+work|no\s+(stable\s+)?income|job\s+loss|employment\s+(ended|terminat)|services\s+were\s+terminated|was\s+not\s+renewed|عاطل|بدون\s*دخل/i,
+      /labou?r|human\s+resources|hr\s+(department|business\s+partner|manager)|ministry|authority|الموارد\s*البشرية/i,
     ],
     minAnchors: 2,
     salaryBearing: false,
