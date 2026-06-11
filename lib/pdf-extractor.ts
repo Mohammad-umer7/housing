@@ -61,6 +61,44 @@ export async function extractTextFromPDF(fileBuffer: ArrayBuffer): Promise<strin
   }
 }
 
+// ── Word (.docx) support ──────────────────────────────────────────────────────
+// Citizens may upload a Word document instead of a PDF. .docx files always carry a clean
+// digital text layer, so mammoth's raw-text extraction feeds the SAME field/forensics
+// pipeline as a PDF text layer — no OCR/vision needed. Legacy binary .doc is not
+// supported by mammoth and degrades to the regex tier (returns '' here).
+
+export function isWordDoc(filename = '', mimeType = ''): boolean {
+  const n = filename.toLowerCase()
+  return (
+    mimeType.includes('officedocument.wordprocessingml') ||
+    mimeType === 'application/msword' ||
+    n.endsWith('.docx') ||
+    n.endsWith('.doc')
+  )
+}
+
+export async function extractTextFromWord(fileBuffer: ArrayBuffer): Promise<string> {
+  try {
+    const mammoth = await import('mammoth')
+    const { value } = await mammoth.extractRawText({ buffer: Buffer.from(fileBuffer) })
+    return (value || '').trim()
+  } catch (error) {
+    console.error('[pdf-extractor] Word (.docx) extraction failed:', error)
+    return ''
+  }
+}
+
+// Dispatch by file type: Word (.docx) → mammoth raw text; everything else → PDF text layer.
+export async function extractTextFromDocument(
+  fileBuffer: ArrayBuffer,
+  filename = '',
+  mimeType = '',
+): Promise<string> {
+  return isWordDoc(filename, mimeType)
+    ? extractTextFromWord(fileBuffer)
+    : extractTextFromPDF(fileBuffer)
+}
+
 // ── 2. Regex-based local parser (Tier 3 — no API required) ───────────────────
 // Handles digitally-generated documents. Works offline, no quota. Salary patterns
 // only apply to income documents; name/employer/date are generic.

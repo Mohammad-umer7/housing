@@ -14,7 +14,7 @@ import {
 import { baseApplicationId } from '@/lib/integrations/source-systems'
 import { requireAuth, checkRateLimit, checkEidRateLimit } from '@/lib/middleware/auth'
 import { successResponse, errorResponse } from '@/lib/api-response'
-import { extractTextFromPDF, extractDocumentFields } from '@/lib/pdf-extractor'
+import { extractTextFromDocument, isWordDoc, extractDocumentFields } from '@/lib/pdf-extractor'
 import { checkStructure, checkArithmetic, extractEmiratesId, extractIban, extractAccountNumber, extractRefNumber, checkPdfMetadata, checkFontConsistency, validateEmiratesIdFormat, validatePhoneUAE } from '@/lib/document-forensics'
 import { checkHashIntegrity } from '@/lib/doc-hash-verify'
 import { classifyRequestCircumstances, determineRequiredDocuments } from '@/governance/housing-arrears'
@@ -121,6 +121,11 @@ export async function POST(req: NextRequest) {
     let pdfBase64: string | null = null
     let arrayBuffer: ArrayBuffer | null = null
     const documentUploaded = !!salaryCertFile
+    // PDFs run the binary forensics + vision OCR/authenticity; Word (.docx) uploads carry a
+    // clean digital text layer instead, so they use the text pipeline only (no PDF forensics,
+    // no vision). Default true (back-compat for callers that never set it).
+    let primaryIsPdf = true
+    let supportingIsPdf = true
     let pdfMetadata: ReturnType<typeof checkPdfMetadata> | null = null
     let fontConsistency: ReturnType<typeof checkFontConsistency> | null = null
 
@@ -129,13 +134,16 @@ export async function POST(req: NextRequest) {
     let supportingArrayBuffer: ArrayBuffer | null = null
 
     if (salaryCertFile) {
+      primaryIsPdf = !isWordDoc(salaryCertFile.name, salaryCertFile.type)
       arrayBuffer = await salaryCertFile.arrayBuffer()
       const pdfBuf = Buffer.from(arrayBuffer.slice(0))
-      extractedPdfText = await extractTextFromPDF(arrayBuffer)
+      extractedPdfText = await extractTextFromDocument(arrayBuffer, salaryCertFile.name, salaryCertFile.type)
       if (pdfBuf.byteLength <= 4 * 1024 * 1024) pdfBase64 = pdfBuf.toString('base64')
-      // PDF forensics — run synchronously on the already-loaded buffer
-      pdfMetadata    = checkPdfMetadata(pdfBuf)
-      fontConsistency = checkFontConsistency(pdfBuf)
+      // PDF-only binary forensics — skipped for Word (not a PDF container).
+      if (primaryIsPdf) {
+        pdfMetadata    = checkPdfMetadata(pdfBuf)
+        fontConsistency = checkFontConsistency(pdfBuf)
+      }
     }
 
     let uploadedDocType: string | undefined = undefined
@@ -205,7 +213,9 @@ export async function POST(req: NextRequest) {
       // Three-tier OCR (Groq → Gemini Vision → regex fallback), doc-type aware: the
       // expected document type's profile tells the extractor exactly which fields to
       // pull (salary cert vs bank statement vs non-work letter vs medical/support doc).
-      pdfExtractedFields = await extractDocumentFields(extractedPdfText, arrayBuffer, expectedDocType)
+      // Vision OCR (Tier 2) only applies to PDFs — for Word the digital text layer above
+      // is authoritative, so pass no bytes and let it use the text/regex tiers.
+      pdfExtractedFields = await extractDocumentFields(extractedPdfText, primaryIsPdf ? arrayBuffer : undefined, expectedDocType)
       // Deterministic forensic signals (doc-type anchors, internal arithmetic, identity).
       // The Gemini VISION authenticity check runs LATER in the background Document Agent —
       // so we keep the raw PDF (base64) on the job payload and do NOT block the citizen's
@@ -241,13 +251,14 @@ export async function POST(req: NextRequest) {
     let pdfSupportingExtractedAccount: string | null = null
 
     if (supportingDocUploaded && supportingDocFile) {
+      supportingIsPdf = !isWordDoc(supportingDocFile.name, supportingDocFile.type)
       supportingArrayBuffer = await supportingDocFile.arrayBuffer()
       const pdfBuf = Buffer.from(supportingArrayBuffer.slice(0))
-      supportingExtractedText = await extractTextFromPDF(supportingArrayBuffer)
+      supportingExtractedText = await extractTextFromDocument(supportingArrayBuffer, supportingDocFile.name, supportingDocFile.type)
       if (pdfBuf.byteLength <= 4 * 1024 * 1024) pdfSupportingBase64 = pdfBuf.toString('base64')
 
       const expectedSupportingType = required.supporting ? required.supporting.type : 'supporting_document'
-      pdfSupportingExtractedFields = await extractDocumentFields(supportingExtractedText, supportingArrayBuffer, expectedSupportingType)
+      pdfSupportingExtractedFields = await extractDocumentFields(supportingExtractedText, supportingIsPdf ? supportingArrayBuffer : undefined, expectedSupportingType)
       pdfSupportingStructure = supportingExtractedText.length >= 40 ? checkStructure(supportingExtractedText, expectedSupportingType) : null
       pdfSupportingArithmetic = checkArithmetic(supportingExtractedText)
       pdfSupportingExtractedEid = extractEmiratesId(supportingExtractedText)
@@ -307,6 +318,7 @@ export async function POST(req: NextRequest) {
       pdfExtractedIban,
       pdfExtractedAccount,
       pdfBase64,
+      primaryIsPdf,
       pdfHashIntegrity,
       // Two-document round-trip — when set, the Document Agent trusts the prior salary-cert
       // validation and only validates the supporting document uploaded in this submission.
@@ -326,6 +338,7 @@ export async function POST(req: NextRequest) {
       pdfSupportingExtractedIban,
       pdfSupportingExtractedAccount,
       pdfSupportingBase64,
+      supportingIsPdf,
       // Unified document manifest (all uploaded files with metadata)
       requestDescription,
       attachedDocuments,

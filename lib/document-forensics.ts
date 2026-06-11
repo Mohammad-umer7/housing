@@ -279,6 +279,10 @@ export type VisionAssessment = {
     employeeName: string | null
     employerName: string | null
     issueDate: string | null
+    // Emirates ID as READ FROM THE RENDERED PAGE by the vision model — independent of the
+    // PDF text layer, so a visually-tampered EID (text layer untouched) is still caught.
+    // Optional: older callers / fixtures predate it (treated as null when absent).
+    emiratesId?: string | null
   }
 }
 
@@ -689,27 +693,50 @@ export function buildVerificationReport(input: ForensicInputs): VerificationRepo
   })
 
   // 4: identity cross-check (Emirates ID / name / employer) against the record.
-  const eidMatch = record && !wrongType && extracted.emiratesId
-    ? norm(extracted.emiratesId) === norm(record.emirates_id)
+  // Compare EVERY Emirates ID we could read against the registry — both the PDF TEXT LAYER
+  // (regex) AND the vision model's read of the RENDERED page. They must ALL agree. A
+  // visually-tampered EID leaves the embedded text untouched, so the vision read disagrees
+  // with the registry → fail (caught). Vision OCR can misread a digit, so a disagreement
+  // here routes to officer review (the safe direction) rather than auto-approval.
+  const regEid = record ? norm(record.emirates_id) : null
+  const textEid = extracted.emiratesId ? norm(extracted.emiratesId) : null
+  const visionEidRaw = vision?.observed?.emiratesId ?? null
+  const visionEidNorm = visionEidRaw ? norm(visionEidRaw) : ''
+  // Only trust a vision EID that is a complete, well-formed UAE EID (784 + 12 digits) so a
+  // partial/garbled OCR read never triggers a false mismatch.
+  const visionEid = /^784\d{12}$/.test(visionEidNorm) ? visionEidNorm : null
+  const readEids: string[] = [textEid, visionEid].filter((e): e is string => !!e)
+  const eidMatch = record && !wrongType && regEid && readEids.length > 0
+    ? readEids.every((e) => e === regEid)
     : null
+  const eidDetail = wrongType
+    ? 'Not evaluated — the file is not the requested document type.'
+    : eidMatch === null
+    ? 'Emirates ID not available to cross-check.'
+    : eidMatch
+    ? 'Emirates ID on the document matches the registry.'
+    : textEid && textEid !== regEid
+    ? `Emirates ID on the document (${extracted.emiratesId}) does not match the registry record.`
+    : `Emirates ID shown on the document (${visionEidRaw}) does not match the registry record — the visible ID differs from the embedded data (possible tampering).`
   checks.push({
     id: 'emirates_id_match',
     label: 'Emirates ID matches the authority record',
     status: eidMatch === null ? 'na' : eidMatch ? 'pass' : 'fail',
-    detail: wrongType
-      ? 'Not evaluated — the file is not the requested document type.'
-      : eidMatch === null
-      ? 'Emirates ID not available to cross-check.'
-      : eidMatch
-      ? 'Emirates ID on the document matches the registry.'
-      : `Emirates ID on the document (${extracted.emiratesId}) does not match the registry record.`,
+    detail: eidDetail,
     weight: 18,
   })
-  const extractedName = extracted.name ?? vision?.observed?.employeeName ?? null
-  const nameMatch = record && !wrongType && extractedName
-    ? norm(extractedName).includes(norm(record.employee_name).slice(0, 10)) ||
-      norm(record.employee_name).includes(norm(extractedName).slice(0, 10))
+  // Name: pass only if EVERY available read — the PDF text layer AND the vision model's read
+  // of the rendered page — fuzzily matches the registry, so a visually-altered name on an
+  // otherwise-genuine file is caught too. Leading-substring matching tolerates formatting.
+  const recName = record?.employee_name ?? ''
+  const nameFuzzy = (a: string) =>
+    norm(a).includes(norm(recName).slice(0, 10)) || norm(recName).includes(norm(a).slice(0, 10))
+  const nameReads = [extracted.name, vision?.observed?.employeeName]
+    .filter((x): x is string => !!x && norm(x).length > 0)
+  const nameMatch = record && !wrongType && recName && nameReads.length > 0
+    ? nameReads.every(nameFuzzy)
     : null
+  const mismatchedName = nameMatch === false ? (nameReads.find((n) => !nameFuzzy(n)) ?? null) : null
   checks.push({
     id: 'name_match',
     label: 'Name matches the authority record',
@@ -718,7 +745,7 @@ export function buildVerificationReport(input: ForensicInputs): VerificationRepo
       ? 'Name not available to cross-check.'
       : nameMatch
       ? 'Name matches the registry.'
-      : `Name on the document ("${extractedName}") differs from the registry ("${record?.employee_name}").`,
+      : `Name on the document ("${mismatchedName}") differs from the registry ("${record?.employee_name}").`,
     weight: 6,
   })
   const extractedEmployer = extracted.employer ?? vision?.observed?.employerName ?? null

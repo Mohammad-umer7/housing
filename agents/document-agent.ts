@@ -133,8 +133,11 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
       // looks genuinely issued — stamps/signatures deliberately ignored. Fully
       // non-fatal: a null result (no key / 503 / timeout / circuit open) leaves the
       // vision check N/A and the deterministic forensics decide alone (fallback).
+      // Vision authenticity applies to PDFs only. A Word (.docx) upload (primaryIsPdf=false)
+      // is validated on its digital text layer + the authority cross-check, so skip vision.
       const pdfBase64 = typeof formData.pdfBase64 === 'string' ? formData.pdfBase64 : null
-      vision = pdfBase64
+      const primaryIsPdf = formData.primaryIsPdf !== false
+      vision = (pdfBase64 && primaryIsPdf)
         ? await assessDocumentAuthenticity(Buffer.from(pdfBase64, 'base64'), expectedType)
         : null
 
@@ -201,7 +204,8 @@ export async function documentNode(state: SaddadStateType): Promise<SaddadNodeUp
       if (stage === 'primary' && verificationReport.verdict !== 'invalid' && Boolean(formData.supportingDocUploaded) && required.supporting) {
         const expectedSupportingType = required.supporting.type
         const pdfSupportingBase64 = typeof formData.pdfSupportingBase64 === 'string' ? formData.pdfSupportingBase64 : null
-        const suppVision: VisionAssessment | null = pdfSupportingBase64
+        const supportingIsPdf = formData.supportingIsPdf !== false
+        const suppVision: VisionAssessment | null = (pdfSupportingBase64 && supportingIsPdf)
           ? await assessDocumentAuthenticity(Buffer.from(pdfSupportingBase64, 'base64'), expectedSupportingType)
           : null
 

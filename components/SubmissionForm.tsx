@@ -235,9 +235,18 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
     try { sessionStorage.setItem('saddad-wizard-state', JSON.stringify({ step, form })) } catch { /* ignore */ }
   }, [step, form, loanDetails])
 
+  // Accept a PDF or a Word document for the main + supporting uploads.
+  function isPdfOrWord(f: File) {
+    const n = f.name.toLowerCase()
+    return (
+      f.type === 'application/pdf' || n.endsWith('.pdf') ||
+      f.type.includes('officedocument.wordprocessingml') || f.type === 'application/msword' ||
+      n.endsWith('.docx') || n.endsWith('.doc')
+    )
+  }
+
   function addFiles(list: File[]) {
-    const pdfs = list.filter(f => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'))
-    setFiles(prev => [...prev, ...pdfs])
+    setFiles(prev => [...prev, ...list.filter(isPdfOrWord)])
   }
   function handleDrop(e: React.DragEvent) {
     e.preventDefault()
@@ -249,8 +258,7 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
   }
 
   function addSupportingFiles(list: File[]) {
-    const pdfs = list.filter(f => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'))
-    setSupportingFiles(prev => [...prev, ...pdfs])
+    setSupportingFiles(prev => [...prev, ...list.filter(isPdfOrWord)])
   }
   function handleSupportingDrop(e: React.DragEvent) {
     e.preventDefault()
@@ -674,11 +682,11 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
                           ) : (
                             <>
                               <p style={{ margin: '16px 0 4px', fontWeight: 700, color: 'var(--ink)' }}>Drag &amp; drop your document</p>
-                              <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>PDF up to 5MB</p>
+                              <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>PDF or Word (.docx) up to 5MB</p>
                               <span className="btn btn-neutral">Browse Files</span>
                             </>
                           )}
-                          <input id="saddad-file-input" type="file" accept=".pdf" className="hidden" style={{ display: 'none' }} onChange={handleFileInput} />
+                          <input id="saddad-file-input" type="file" accept=".pdf,.doc,.docx" className="hidden" style={{ display: 'none' }} onChange={handleFileInput} />
                         </div>
                         {files.length > 0 && (
                           <input type="text" className="input" placeholder="Brief description of this document (optional)"
@@ -710,11 +718,11 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
                           ) : (
                             <>
                               <p style={{ margin: '16px 0 4px', fontWeight: 700, color: 'var(--ink)' }}>Drag &amp; drop your supporting document</p>
-                              <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>PDF up to 5MB</p>
+                              <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>PDF or Word (.docx) up to 5MB</p>
                               <span className="btn btn-neutral">Browse Files</span>
                             </>
                           )}
-                          <input id="saddad-supporting-file-input" type="file" accept=".pdf" className="hidden" style={{ display: 'none' }} onChange={handleSupportingFileInput} />
+                          <input id="saddad-supporting-file-input" type="file" accept=".pdf,.doc,.docx" className="hidden" style={{ display: 'none' }} onChange={handleSupportingFileInput} />
                         </div>
                         {supportingFiles.length > 0 && (
                           <input type="text" className="input" placeholder="Brief description of this document (optional)"

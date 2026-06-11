@@ -351,6 +351,7 @@ Return ONLY this JSON object (no markdown, no explanation):
   "reasons": [<short explanation strings>],
   "observed": {
     "documentType": <what type this appears to be, or null>,
+    "emiratesId": <the Emirates ID number printed on the document exactly as shown, format 784-YYYY-NNNNNNN-C, or null if none is visible>,
 ${fieldJsonLines(expectedType)}
   }
 }
@@ -416,6 +417,7 @@ function coerceAuthenticity(raw: unknown, expectedType: ExpectedDocType): Vision
       employeeName: str(obs.employeeName),
       employerName: str(obs.employerName),
       issueDate:    str(obs.issueDate),
+      emiratesId:   str(obs.emiratesId),
     },
   }
 }
@@ -521,6 +523,7 @@ Return ONLY this JSON object (no markdown, no explanation):
   "reasons": [<short explanation strings>],
   "observed": {
     "documentType": <what type this appears to be, or null>,
+    "emiratesId": <the Emirates ID number printed on the document exactly as shown, format 784-YYYY-NNNNNNN-C, or null if none is visible>,
 ${fieldJsonLines(expectedType)}
   }
 }
