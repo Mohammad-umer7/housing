@@ -14,6 +14,10 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Coverage reports — generated, not source.
     "coverage/**",
+    // Second, self-contained project (MOE Strategist) — deployed as its OWN Vercel
+    // project with Root Directory = moe-strategist. The housing app must never lint or
+    // type-check it (it has its own tsconfig/eslint). See tsconfig "exclude" too.
+    "moe-strategist/**",
   ]),
 ]);
 

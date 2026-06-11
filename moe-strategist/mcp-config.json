@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "moe-strategist": {
+      "command": "node",
+      "args": ["mcp-server.js"],
+      "description": "MOE Strategist Economic Analysis and Data Extraction Server",
+      "cwd": ".",
+      "env": {
+        "NODE_ENV": "production"
+      }
+    }
+  },
+  "description": "Model Context Protocol configuration for MOE Strategist platform",
+  "version": "1.0.0"
+}
