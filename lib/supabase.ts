@@ -1,9 +1,15 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
+import { isDemoBackend } from './demo/config'
+import { getMockSupabase } from './demo/mock-supabase'
 
 let _supabase: SupabaseClient | null = null
 let _supabaseAdmin: SupabaseClient | null = null
 
+// When no Supabase project is configured (portable demo), every client is the
+// in-memory mock — so the whole app runs with zero external dependencies. When real
+// keys are present, nothing changes: the real client is used exactly as before.
 export function getSupabase() {
+  if (isDemoBackend()) return getMockSupabase() as unknown as SupabaseClient
   if (!_supabase) {
     _supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -14,6 +20,7 @@ export function getSupabase() {
 }
 
 export function getSupabaseAdmin() {
+  if (isDemoBackend()) return getMockSupabase() as unknown as SupabaseClient
   if (!_supabaseAdmin) {
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     _supabaseAdmin = createClient(

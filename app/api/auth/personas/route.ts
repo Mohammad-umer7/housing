@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { successResponse, errorResponse } from '@/lib/api-response'
 import { getAllApplicants } from '@/lib/integrations/source-systems'
+import { isDemoMode } from '@/lib/demo/config'
 
 // GET /api/auth/personas
 // Public (pre-login) list of the demo "log in as a citizen" personas, read from
@@ -8,7 +9,7 @@ import { getAllApplicants } from '@/lib/integrations/source-systems'
 // salary or financials — so nothing sensitive is exposed before authentication.
 // Gated behind DEMO_MODE: disabled in production, where UAE PASS would replace it.
 export async function GET() {
-  if (process.env.DEMO_MODE !== 'true') {
+  if (!isDemoMode()) {
     return NextResponse.json(errorResponse('Persona login is disabled', 403), { status: 403 })
   }
 

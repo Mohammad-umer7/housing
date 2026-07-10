@@ -3,10 +3,14 @@ import { signSession, SESSION_COOKIE, SESSION_DURATION_MS, type Role } from '@/l
 import { successResponse, errorResponse } from '@/lib/api-response'
 import { checkRateLimit } from '@/lib/middleware/auth'
 import { logLogin } from '@/lib/data-layer'
+import { isDemoMode } from '@/lib/demo/config'
 
 type User = { username: string; password: string; role: Role }
 
-// Credentials come from env vars only. Add more users by adding env pairs.
+// Credentials come from env vars. In a keyless demo checkout, fall back to the
+// standard demo credentials (admin / officer, password "saddad-2026") so the staff
+// portals are reachable out of the box. Production sets its own AUTH_* env pairs.
+const DEMO = isDemoMode()
 const USERS: User[] = []
 if (process.env.AUTH_ADMIN_USERNAME && process.env.AUTH_ADMIN_PASSWORD) {
   USERS.push({
@@ -14,6 +18,8 @@ if (process.env.AUTH_ADMIN_USERNAME && process.env.AUTH_ADMIN_PASSWORD) {
     password: process.env.AUTH_ADMIN_PASSWORD,
     role: 'admin',
   })
+} else if (DEMO) {
+  USERS.push({ username: 'admin', password: 'saddad-2026', role: 'admin' })
 }
 if (process.env.AUTH_OFFICER_USERNAME && process.env.AUTH_OFFICER_PASSWORD) {
   USERS.push({
@@ -21,6 +27,8 @@ if (process.env.AUTH_OFFICER_USERNAME && process.env.AUTH_OFFICER_PASSWORD) {
     password: process.env.AUTH_OFFICER_PASSWORD,
     role: 'officer',
   })
+} else if (DEMO) {
+  USERS.push({ username: 'officer', password: 'saddad-2026', role: 'officer' })
 }
 
 export async function POST(req: NextRequest) {

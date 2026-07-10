@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import SubmissionForm from '@/components/SubmissionForm'
 import AgentProcessing from '@/components/AgentProcessing'
 import CitizenHome from '@/components/CitizenHome'
+import Onboarding from '@/components/Onboarding'
 import { GovHeader, GovFooter, type NavId } from '@/components/saddad-ui'
 
 type Screen = 'home' | 'form' | 'processing'
@@ -109,6 +110,7 @@ export default function Home() {
 
   return (
     <div className="page">
+      <Onboarding />
       <a href="#main-content" className="sr-only">Skip to main content</a>
       <GovHeader active={(screen === 'processing' ? 'processing' : 'submit') as NavId} onNav={handleNav} userRole="citizen" />
       <main id="main-content" className="page-body">

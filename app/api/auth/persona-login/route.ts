@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { signSession, SESSION_COOKIE, SESSION_DURATION_MS } from '@/lib/auth/session'
 import { successResponse, errorResponse } from '@/lib/api-response'
 import { getApplicant } from '@/lib/integrations/source-systems'
+import { isDemoMode } from '@/lib/demo/config'
 
 // POST /api/auth/persona-login  { caseNumber }
 // Demo "log in as this citizen" entry point. Validates the applicant exists, then
@@ -10,7 +11,7 @@ import { getApplicant } from '@/lib/integrations/source-systems'
 // full app (Submit / Dashboard / Officer view) is usable in the demo. Gated behind
 // DEMO_MODE — in production UAE PASS OIDC replaces this (see docs/SECURITY.md).
 export async function POST(req: NextRequest) {
-  if (process.env.DEMO_MODE !== 'true') {
+  if (!isDemoMode()) {
     return NextResponse.json(errorResponse('Persona login is disabled', 403), { status: 403 })
   }
 

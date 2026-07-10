@@ -2,12 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { signSession, SESSION_COOKIE, SESSION_DURATION_MS } from '@/lib/auth/session'
 import { successResponse, errorResponse } from '@/lib/api-response'
 import { logLogin } from '@/lib/data-layer'
+import { isDemoMode } from '@/lib/demo/config'
 
 // One-click demo login. Issues an officer session WITHOUT credentials, but only
-// when DEMO_MODE is explicitly enabled. In production (DEMO_MODE unset) this
-// endpoint returns 403, so the real credential login is the only way in.
+// when demo mode is enabled (DEMO_MODE, or any keyless demo backend). In production
+// (real backend, DEMO_MODE unset) this returns 403 so credential login is the only way in.
 export async function POST(req: NextRequest) {
-  if (process.env.DEMO_MODE !== 'true') {
+  if (!isDemoMode()) {
     return NextResponse.json(errorResponse('Demo login is disabled', 403), { status: 403 })
   }
 

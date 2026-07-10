@@ -5,7 +5,11 @@
 // For production: rotate SESSION_SECRET periodically, consider replacing
 // with UAE PASS OIDC for federated identity (see docs/SECURITY.md).
 
-const SECRET = process.env.SESSION_SECRET ?? ''
+import { DEMO_SESSION_SECRET } from '@/lib/demo/config'
+
+// A signing secret is REQUIRED. Production sets SESSION_SECRET; a keyless demo
+// checkout falls back to a fixed demo secret so sign-in still works out of the box.
+const SECRET = process.env.SESSION_SECRET || DEMO_SESSION_SECRET
 export const SESSION_COOKIE = 'saddad_session'
 export const SESSION_DURATION_MS = 8 * 60 * 60 * 1000 // 8 hours
 
