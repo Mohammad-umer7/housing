@@ -280,6 +280,29 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
   function removeExtraDoc(idx: number) { setAdditionalDocs(prev => prev.filter((_, i) => i !== idx)) }
   function updateExtraDesc(idx: number, desc: string) { setAdditionalDocs(prev => prev.map((d, i) => i === idx ? { ...d, description: desc } : d)) }
 
+  // ── Demo sample documents ──────────────────────────────────────────────────────
+  // Only shown in demo mode. Each sample PDF's content deterministically routes through
+  // the (LLM-free) forensic pipeline to a known outcome, so a presenter can show every
+  // decision path without preparing real files. Calibrated for the demo applicant Salem
+  // (MSZHP_100075). See tools/generate-demo-docs.mjs.
+  const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === 'true'
+  const [demoLoading, setDemoLoading] = useState<string | null>(null)
+  async function loadDemoDoc(file: string, outcome: string) {
+    try {
+      setDemoLoading(file)
+      const res = await fetch(`/demo-docs/${file}`)
+      if (!res.ok) throw new Error('fetch failed')
+      const blob = await res.blob()
+      const f = new File([blob], file, { type: 'application/pdf' })
+      setFiles([f])
+      setPrimaryDescription(`Demo sample document — expected outcome: ${outcome}`)
+    } catch {
+      setStepError('Could not load the demo document. Please try again.')
+    } finally {
+      setDemoLoading(null)
+    }
+  }
+
   // Hard input-sanity gate: salary and amount due must be positive numbers.
   const salaryInvalid = form.monthly_salary.trim() !== '' && !(Number(form.monthly_salary) > 0)
   const arrearsInvalid = form.arrears_amount.trim() !== '' && !(Number(form.arrears_amount) > 0)
@@ -670,6 +693,33 @@ export default function SubmissionForm({ onSubmit, onHome }: Props) {
                         <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 16, color: docRequired ? 'var(--red)' : 'var(--muted)' }}>
                           {docRequired ? `* Required — ${primaryLabel}` : '(optional — income verified from records)'}
                         </p>
+
+                        {DEMO_MODE && (
+                          <div style={{ marginBottom: 16, padding: '14px 16px', borderRadius: 'var(--r)', border: '1px dashed var(--gold-line, rgba(194,161,78,0.4))', background: 'var(--cream-soft, rgba(194,161,78,0.06))' }}>
+                            <p style={{ fontSize: 11.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--gold-dark)', margin: '0 0 3px' }}>
+                              <Ico.doc2 width={13} height={13} style={{ verticalAlign: '-2px', marginRight: 5 }} />Demo sample documents
+                            </p>
+                            <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: '0 0 11px', lineHeight: 1.45 }}>
+                              No file handy? Load a fictional sample to see each decision path. Calibrated for the demo applicant <strong>Salem (MSZHP_100075)</strong>.
+                            </p>
+                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                              {[
+                                { file: 'demo-approve.pdf',  label: 'Will be Approved',  outcome: 'Approved',  tone: 'var(--green)' },
+                                { file: 'demo-escalate.pdf', label: 'Will be Escalated', outcome: 'Escalated', tone: 'var(--amber, #b7791f)' },
+                                { file: 'demo-reject.pdf',   label: 'Will be Rejected',  outcome: 'Rejected',  tone: 'var(--red)' },
+                              ].map((d) => (
+                                <button key={d.file} type="button" className="btn btn-neutral"
+                                  style={{ fontSize: 12.5, borderColor: d.tone, color: d.tone, opacity: demoLoading ? 0.6 : 1 }}
+                                  disabled={!!demoLoading}
+                                  onClick={() => loadDemoDoc(d.file, d.outcome)}>
+                                  <span style={{ width: 8, height: 8, borderRadius: 99, background: d.tone, display: 'inline-block', marginRight: 6 }} />
+                                  {demoLoading === d.file ? 'Loading…' : d.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         <div className="file-dropzone" onClick={() => document.getElementById('saddad-file-input')?.click()}
                           onDrop={handleDrop} onDragOver={(e) => { e.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)}
                           style={dragging ? { borderColor: 'var(--gold)', background: 'var(--cream-soft)' } : undefined}>

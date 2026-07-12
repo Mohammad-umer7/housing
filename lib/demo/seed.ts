@@ -14,13 +14,16 @@ const NOW = '2026-07-01T09:00:00.000Z'
 //   clean approve · borderline · high-arrears escalation · priority (UAE PASS) cases.
 const APPLICANTS: Row[] = [
   {
+    // Canonical doc-demo applicant: reason 'other' → a single salary certificate is the
+    // only required document, so the three demo sample docs route cleanly. Salary 27,880
+    // matches the calibrated demo-approve.pdf certificate. Clean financials → APPROVE path.
     case_number: 'MSZHP_100075', full_name: 'Salem Saif Al Ameri', full_name_ar: 'سالم سيف العامري',
     emirates_id: '784-1988-2341567-3', phone: '+971501234567',
     arrears_amount: 10641, monthly_salary: 27880, monthly_expenses: 4200,
     property_address: 'Villa 42, Al Bateen, Abu Dhabi', previous_default: false, status: 'pending',
     loan_bank_name: 'Emirates Development Bank', loan_account_number: 'EDB-2021-104587',
     total_loan_amount: 480000, remaining_loan_balance: 410000, current_installment: 3620,
-    remaining_loan_months: 132, auto_dda: true, reschedule_reason: 'medical_expenses',
+    remaining_loan_months: 132, auto_dda: true, reschedule_reason: 'other',
     months_in_arrears: 3, family_size: 4, marital_status: 'married', income_changed: false,
     number_of_children: 2, has_active_application: false, payment_history: [], created_at: NOW,
   },
