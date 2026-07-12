@@ -1,12 +1,17 @@
 // Central switch for the portable "demo" mode.
 //
 // The app runs in one of two backends:
-//   • REAL   — a Supabase project is configured (NEXT_PUBLIC_SUPABASE_URL set).
-//   • DEMO   — no Supabase configured (or DEMO_DB=true forces it). The in-memory
-//              mock store backs every data-layer call, so the whole system works
-//              with zero external dependencies (self-contained demo / hackathon build).
+//   • REAL   — a real Supabase project is used (must be EXPLICITLY opted into).
+//   • DEMO   — the in-memory mock store backs every data-layer call, so the whole
+//              system works with zero external dependencies (self-contained demo /
+//              hackathon build). This is the DEFAULT unless you opt into the real DB.
 //
 // isDemoBackend() is the single gate lib/supabase.ts consults to pick the client.
+//
+// Why demo is the default: this build is deployed as a public demo (Vercel), where the
+// real Supabase project may be paused/unreachable. Requiring an explicit opt-in for the
+// real DB means the demo "just works" everywhere without extra env-var wiring. To use a
+// real Supabase project, set DEMO_DB=false (and configure the SUPABASE_* keys).
 
 export function isSupabaseConfigured(): boolean {
   return Boolean(
@@ -15,15 +20,20 @@ export function isSupabaseConfigured(): boolean {
   )
 }
 
-// Use the in-memory demo store when Supabase isn't configured, or when explicitly
-// forced with DEMO_DB=true (lets you test demo mode even with real keys present).
+// The in-memory demo store is used UNLESS the real DB is explicitly opted into.
+// Opt into the real Supabase project with DEMO_DB=false (or USE_REAL_DB=true) AND
+// real SUPABASE_* keys present. Any demo flag, or DEMO_DB=true, or no keys → demo.
 export function isDemoBackend(): boolean {
-  return process.env.DEMO_DB === 'true' || !isSupabaseConfigured()
+  // Explicit opt-out — use the real Supabase project (only honoured if keys exist).
+  if ((process.env.DEMO_DB === 'false' || process.env.USE_REAL_DB === 'true') && isSupabaseConfigured()) {
+    return false
+  }
+  // Otherwise the demo mock backs everything.
+  return true
 }
 
-// Demo-mode UX (one-click officer/admin login, UAE PASS persona picker). Explicitly
-// enabled via DEMO_MODE, and implicitly ON whenever there's no real backend — so a
-// keyless checkout still signs in and runs.
+// Demo-mode UX (one-click officer/admin login, UAE PASS persona picker). ON whenever
+// the demo backend is active (which is the default), or when DEMO_MODE is set.
 export function isDemoMode(): boolean {
   return process.env.DEMO_MODE === 'true' || isDemoBackend()
 }
