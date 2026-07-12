@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Emblem, Ico } from '@/components/saddad-ui'
 import { useA11y } from '@/components/AccessibilityProvider'
+import Onboarding from '@/components/Onboarding'
 
 type Modal = null | 'uaepass' | 'officer' | 'admin' | 'whatis'
 
@@ -121,6 +122,7 @@ export default function LoginPage() {
 
   return (
     <div className="login-container fade-in">
+      <Onboarding />
       <button className="login-lang" onClick={() => update({ lang: lang === 'ar' ? 'en' : 'ar' })}>
         {lang === 'ar' ? 'English' : 'العربية'}
       </button>
